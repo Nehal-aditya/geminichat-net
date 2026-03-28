@@ -13,7 +13,7 @@ on:
 
 env:
   APP_NAME: "Gemini Chat"              # <<-- change this
-  PROJECT_PATH: "geminichat-net/GeminiChat.csproj" # <<-- change this
+  PROJECT_PATH: "GeminiChat.csproj" # <<-- change this
   MANUFACTURER: "Nehaladitya"            # <<-- change this
   OUTPUT_DIR: "artifacts"
 
