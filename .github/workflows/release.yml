@@ -54,17 +54,12 @@ jobs:
           fi
 
           # --- WiX version sanitization ---
-          # Strip everything except digits and dots
           WIX_VERSION=$(echo "$VERSION" | sed 's/[^0-9\.]//g')
-
-          # Count parts
           PARTS=$(echo "$WIX_VERSION" | awk -F. '{print NF}')
-          # Pad to 4 parts
           while [ "$PARTS" -lt 4 ]; do
             WIX_VERSION="${WIX_VERSION}.0"
             PARTS=$((PARTS+1))
           done
-          # Truncate if more than 4 parts
           if [ "$PARTS" -gt 4 ]; then
             WIX_VERSION=$(echo "$WIX_VERSION" | cut -d. -f1-4)
           fi
@@ -155,11 +150,18 @@ jobs:
           }
 
           $exePath = (Resolve-Path "publish\$RID\${{ env.APP_NAME }}.exe").Path
+          $wixVersion = $env:WIX_VERSION
           $version = "${{ env.VERSION }}"
           $appName = "${{ env.APP_NAME }}"
           $manufacturer = "${{ env.MANUFACTURER }}"
           $exeFileName = "${{ env.APP_NAME }}.exe"
           $upgradeCode = "${{ env.UPGRADE_CODE }}"
+
+          # Compile .wxs into .wixobj
+          candle.exe -dWIX_VERSION=$wixVersion artifacts/$rid/Product.wxs -o artifacts/$rid/Product.wixobj
+
+          # Link into MSI
+          light.exe -dWIX_VERSION=$wixVersion artifacts/$rid/Product.wixobj -o artifacts/$rid/GeminiChat-$rid-$version.msi
 
           # Build conditional XML elements
           $iconLine = if ($iconPath) { "<File Id=""filIcon"" Source=""$iconPath"" />" } else { "" }
