@@ -1,150 +1,169 @@
-# 🤖 Gemini Chat — Avalonia UI Desktop App
+# Gemini Chat
 
-A beautiful, feature-rich AI chatbot desktop application built with **Avalonia UI** and **C#**, powered by **Google Gemini** models.
+> A beautiful, fast desktop AI chatbot built with **Avalonia UI** and **C# (.NET 8)**, powered by **Google Gemini** models — with persistent history, streaming responses, and a polished dark UI.
 
----
-
-## ✨ Features
-
-- **5 Gemini Models** supported:
-  - `gemini-2.5-flash-preview-05-20` — Gemini 2.5 Flash
-  - `gemini-2.5-pro-preview-05-06` — Gemini 2.5 Pro
-  - `gemini-3.0-flash` — Gemini 3 Flash
-  - `gemini-3.1-flash-lite` — Gemini 3.1 Flash Lite
-  - `gemini-3.1-pro` — Gemini 3.1 Pro
-
-- **Streaming responses** — watch AI type in real time
-- **Multiple chat sessions** with auto-titling
-- **Persistent settings** (API key, preferences saved to disk)
-- **Generation config**: Temperature, Top-P, Top-K, Max Tokens
-- **Custom system prompt** support
-- **Stop generation** mid-stream
-- **Dark mode** UI with deep navy/slate theme
-- **Cross-platform**: Windows, macOS, Linux
+![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)
+![Avalonia](https://img.shields.io/badge/Avalonia-11.2-purple?logo=dotnet)
+![Platform](https://img.shields.io/badge/Platform-Windows%2011-0078D4?logo=windows)
+![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
-## 🚀 Getting Started
+## Features
+
+- **6 Gemini models** selectable per-session from the top bar
+- **Streaming responses** — watch the AI type in real time
+- **Persistent chat history** — sessions survive restarts, saved to `%AppData%\GeminiChat\`
+- **Multiple sessions** — sidebar with named chats, auto-titled from first message
+- **Stop generation** mid-stream with one click
+- **Configurable generation** — temperature, max output tokens, system prompt
+- **API key validation** — tested against the live models endpoint before saving
+- **Enter to send**, Shift+Enter for newline
+- Deep navy dark theme
+
+---
+
+## Supported Models
+
+| Display Name | API Model ID | Series |
+|---|---|---|
+| Gemini 2.5 Flash | `gemini-2.5-flash` | 2.5 |
+| Gemini 2.5 Pro | `gemini-2.5-pro` | 2.5 |
+| Gemini 2.5 Flash Lite | `gemini-2.5-flash-lite` | 2.5 |
+| Gemini 3 Flash | `gemini-3-flash-preview` | 3 |
+| Gemini 3.1 Pro | `gemini-3.1-pro-preview` | 3.1 |
+| Gemini 3.1 Flash Lite | `gemini-3.1-flash-lite-preview` | 3.1 |
+
+---
+
+## Installation
+
+### Option A — MSI Installer (recommended)
+
+1. Go to the [**Releases**](../../releases) page
+2. Download the `.msi` for your architecture:
+   - `GeminiChat-x64.msi` — Windows 11 x86-64 (most PCs)
+   - `GeminiChat-arm64.msi` — Windows 11 ARM64 (Surface Pro X, Copilot+ PCs)
+3. Run the installer — creates shortcuts in Desktop and Start Menu
+4. Launch **Gemini Chat** and paste your API key
+
+### Option B — Portable EXE
+
+Download `GeminiChat-x64.exe` or `GeminiChat-arm64.exe` from [Releases](../../releases) and run directly — no installation needed.
+
+---
+
+## Getting an API Key
+
+1. Visit [https://aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+2. Sign in with your Google account
+3. Click **Create API Key**
+4. Copy the key (starts with `AIzaSy…`)
+5. Paste it in the **API Key** field when Gemini Chat launches and click **Validate & Save**
+
+> **Free tier**: Google provides a generous free quota for Gemini 2.5 Flash. No billing required to get started.
+
+---
+
+## Building from Source
 
 ### Prerequisites
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- A [Google Gemini API key](https://ai.google.dev) (free tier available)
+
+- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
 
 ### Run
+
 ```bash
+git clone https://github.com/YOUR_USERNAME/GeminiChat.git
 cd GeminiChat
 dotnet run
 ```
 
-### Build (Release)
+### Publish self-contained EXE
+
 ```bash
-dotnet publish -c Release -r win-x64 --self-contained
-# or for macOS:
-dotnet publish -c Release -r osx-x64 --self-contained
-# or Linux:
-dotnet publish -c Release -r linux-x64 --self-contained
+# Windows x64
+dotnet publish GeminiChat.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o out/win-x64
+
+# Windows ARM64
+dotnet publish GeminiChat.csproj -c Release -r win-arm64 --self-contained true -p:PublishSingleFile=true -o out/win-arm64
 ```
 
 ---
 
-## 🔑 API Key Setup
+## Releasing a New Version
 
-1. Visit [https://ai.google.dev](https://ai.google.dev)
-2. Create a free API key
-3. On first launch, paste your key in the **API Key bar** at the top
-4. Click **Validate & Save** — the key is stored locally in `AppData/GeminiChat/settings.json`
+Releases are fully automated via GitHub Actions (`.github/workflows/release.yml`).
+
+### Via Git tag (recommended)
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow automatically builds:
+- `GeminiChat-x64.exe` — portable, Windows x64
+- `GeminiChat-arm64.exe` — portable, Windows ARM64
+- `GeminiChat-x64.msi` — installer, Windows x64
+- `GeminiChat-arm64.msi` — installer, Windows ARM64
+
+...and creates a GitHub Release with all four files attached.
+
+### Via GitHub UI
+
+Go to **Actions → Release → Run workflow** and enter a version string (e.g. `1.0.0`).
 
 ---
 
-## 🎛 UI Overview
-
-| Area | Description |
-|---|---|
-| **Left Sidebar** | Chat session history, New Chat button |
-| **Top Bar** | Model selector, sidebar toggle, clear button |
-| **Chat Area** | Message bubbles (user right, AI left) |
-| **Input Bar** | Multi-line input, Send (➤) and Stop (■) buttons |
-| **Settings Panel** | API key, model, temperature, streaming, system prompt |
-
----
-
-## 🏗 Project Structure
+## Project Structure
 
 ```
 GeminiChat/
+├── .github/
+│   └── workflows/
+│       └── release.yml          # Builds exe + msi, publishes to GitHub Releases
 ├── Models/
-│   └── Models.cs           # ChatMessage, ChatSession, GeminiModel, GenerationConfig
+│   └── Models.cs                # ChatMessage, ChatSession, GeminiModel, GenerationConfig
 ├── Services/
-│   ├── GeminiService.cs    # HTTP client, streaming, API calls
-│   └── SettingsService.cs  # Persistent settings (JSON)
+│   ├── GeminiService.cs         # HTTP client, streaming SSE, API validation
+│   └── SettingsService.cs       # JSON persistence for settings + chat history
 ├── ViewModels/
-│   └── MainViewModel.cs    # All app logic, commands, state
+│   └── MainViewModel.cs         # All app logic and UI state (MVVM)
 ├── Views/
-│   ├── MainWindow.axaml    # Full UI layout
-│   └── MainWindow.axaml.cs # Code-behind (Enter key handler)
+│   ├── MainWindow.axaml         # Full UI layout (AXAML)
+│   └── MainWindow.axaml.cs      # Code-behind (Enter key handler)
 ├── Converters/
-│   └── Converters.cs       # IValueConverter implementations
-├── App.axaml               # Application entry + theme
-├── Program.cs              # Main entry point
-└── GeminiChat.csproj       # Project file
+│   └── Converters.cs            # IValueConverter implementations
+├── App.axaml                    # Application + Fluent theme
+├── Program.cs                   # Entry point
+└── GeminiChat.csproj            # Project file (.NET 8 / WinExe)
 ```
 
 ---
 
-## ⚙️ Configuration
+## Data & Privacy
 
-Settings are saved to `%AppData%/GeminiChat/settings.json` (Windows) or `~/.config/GeminiChat/settings.json` (Linux/macOS).
-
-```json
-{
-  "ApiKey": "AIzaSy...",
-  "DefaultModelId": "gemini-2.5-flash-preview-05-20",
-  "Temperature": 0.9,
-  "TopP": 1.0,
-  "TopK": 40,
-  "MaxOutputTokens": 8192,
-  "EnableStreaming": true,
-  "SystemPrompt": "You are a helpful AI assistant.",
-  "ShowTokenCount": true
-}
-```
+- API key stored **locally only** at `%AppData%\GeminiChat\settings.json`
+- Chat history stored **locally only** at `%AppData%\GeminiChat\history.json`
+- No telemetry, no analytics, no cloud sync of any kind
+- Messages go directly from your machine to the Google Gemini API
 
 ---
 
-## 📦 Dependencies
+## Dependencies
 
 | Package | Version | Purpose |
 |---|---|---|
-| Avalonia | 11.2.3 | Cross-platform UI framework |
+| [Avalonia](https://avaloniaui.net) | 11.2.3 | Cross-platform UI framework |
 | Avalonia.Desktop | 11.2.3 | Desktop runtime |
-| Avalonia.Themes.Fluent | 11.2.3 | Fluent design theme |
+| Avalonia.Themes.Fluent | 11.2.3 | Fluent design system |
 | Avalonia.ReactiveUI | 11.2.3 | Reactive bindings |
-| CommunityToolkit.Mvvm | 8.3.2 | MVVM source generators |
+| CommunityToolkit.Mvvm | 8.3.2 | Source-generated MVVM |
 | System.Text.Json | 9.0.0 | JSON serialization |
 
 ---
 
-## 🔧 Extending
-
-**Add a new model:**
-```csharp
-// In Models/Models.cs
-public static readonly GeminiModel MyNewModel = new()
-{
-    Id = "gemini-x.x-xxx",
-    DisplayName = "Gemini X.X Name",
-    Description = "Description here",
-    Badge = "X.X",
-    MaxTokens = 8192
-};
-// Then add to the All list
-```
-
-**Change the theme colors:**  
-Edit the `Window.Styles` section in `Views/MainWindow.axaml` — all colors use hex literals that can be swapped globally.
-
----
-
-## 📄 License
+## License
 
 MIT — free to use, modify, and distribute.

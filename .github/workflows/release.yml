@@ -1,277 +1,499 @@
-name: Release Windows builds (with persistent UpgradeCode)
+name: Release
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TRIGGER RULES
+#
+# Stable release:     git tag v1.2.3       → push to GitHub
+# Pre-release:        git tag v1.2.3-beta.1
+#                     git tag v1.2.3-alpha.2
+#                     git tag v1.2.3-rc.1
+#
+# Manual (UI):        Actions → Release → Run workflow
+#                     Fill in version + choose release type
+# ─────────────────────────────────────────────────────────────────────────────
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]+.[0-9]+.[0-9]+'              # stable:     v1.2.3
+      - 'v[0-9]+.[0-9]+.[0-9]+-alpha*'       # alpha:      v1.2.3-alpha.1
+      - 'v[0-9]+.[0-9]+.[0-9]+-beta*'        # beta:       v1.2.3-beta.2
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc*'          # release candidate: v1.2.3-rc.1
+      - 'v[0-9]+.[0-9]+.[0-9]+-preview*'     # preview:    v1.2.3-preview.1
+
   workflow_dispatch:
     inputs:
-      prerelease:
-        description: 'Mark release as prerelease'
-        required: false
-        default: 'false'
+      version:
+        description: 'Version number — e.g. 1.2.3 or 1.2.3-beta.1'
+        required: true
+        default: '1.0.0'
+      release_type:
+        description: 'Release type'
+        required: true
+        type: choice
+        default: stable
+        options:
+          - stable
+          - alpha
+          - beta
+          - rc
+          - preview
+      draft:
+        description: 'Publish as draft (review before going live)'
+        required: true
+        type: boolean
+        default: false
 
+# ─────────────────────────────────────────────────────────────────────────────
 env:
-  APP_NAME: "GeminiChat"              # <<-- change this
-  PROJECT_PATH: "GeminiChat.csproj" # <<-- change this
-  MANUFACTURER: "Nehaladitya"            # <<-- change this
-  OUTPUT_DIR: "artifacts"
+  APP_NAME:                  GeminiChat
+  DOTNET_VERSION:            '8.0.x'
+  PROJECT_PATH:              GeminiChat.csproj
+  DOTNET_NOLOGO:             true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
 
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
-  build:
-    runs-on: windows-latest
-    strategy:
-      matrix:
-        runtime:
-          - win-x64
-          - win-arm64
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 1 — Resolve version, channel, and prerelease flag
+  # ───────────────────────────────────────────────────────────────────────────
+  version:
+    name: Resolve Version & Channel
+    runs-on: ubuntu-latest
+    outputs:
+      version:      ${{ steps.resolve.outputs.version }}
+      tag:          ${{ steps.resolve.outputs.tag }}
+      is_prerelease: ${{ steps.resolve.outputs.is_prerelease }}
+      channel:      ${{ steps.resolve.outputs.channel }}
+      is_draft:     ${{ steps.resolve.outputs.is_draft }}
+      display_name: ${{ steps.resolve.outputs.display_name }}
 
     steps:
-      - name: Checkout (allow push)
+      - name: Resolve version metadata
+        id: resolve
+        shell: bash
+        run: |
+          # ── Determine raw version string ────────────────────────────────
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+            IS_DRAFT="false"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+            RTYPE="${{ github.event.inputs.release_type }}"
+            IS_DRAFT="${{ github.event.inputs.draft }}"
+
+            # Append channel suffix if not already in version string and not stable
+            if [[ "${RTYPE}" != "stable" && "${VERSION}" != *"-"* ]]; then
+              VERSION="${VERSION}-${RTYPE}.1"
+            fi
+            TAG="v${VERSION}"
+          fi
+
+          # ── Detect channel from version suffix ──────────────────────────
+          IS_PRERELEASE="false"
+          CHANNEL="stable"
+
+          if   [[ "${VERSION}" == *"-alpha"*   ]]; then CHANNEL="alpha";   IS_PRERELEASE="true"
+          elif [[ "${VERSION}" == *"-beta"*    ]]; then CHANNEL="beta";    IS_PRERELEASE="true"
+          elif [[ "${VERSION}" == *"-rc"*      ]]; then CHANNEL="rc";      IS_PRERELEASE="true"
+          elif [[ "${VERSION}" == *"-preview"* ]]; then CHANNEL="preview"; IS_PRERELEASE="true"
+          elif [[ "${VERSION}" == *"-"*        ]]; then CHANNEL="pre";     IS_PRERELEASE="true"
+          fi
+
+          # ── Human-readable display name ─────────────────────────────────
+          case "${CHANNEL}" in
+            alpha)   DISPLAY_NAME="Gemini Chat v${VERSION} (Alpha)" ;;
+            beta)    DISPLAY_NAME="Gemini Chat v${VERSION} (Beta)" ;;
+            rc)      DISPLAY_NAME="Gemini Chat v${VERSION} (Release Candidate)" ;;
+            preview) DISPLAY_NAME="Gemini Chat v${VERSION} (Preview)" ;;
+            pre)     DISPLAY_NAME="Gemini Chat v${VERSION} (Pre-release)" ;;
+            *)       DISPLAY_NAME="Gemini Chat v${VERSION}" ;;
+          esac
+
+          echo "version=${VERSION}"           >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"                   >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "channel=${CHANNEL}"           >> "$GITHUB_OUTPUT"
+          echo "is_draft=${IS_DRAFT}"         >> "$GITHUB_OUTPUT"
+          echo "display_name=${DISPLAY_NAME}" >> "$GITHUB_OUTPUT"
+
+          echo "────────────────────────────────────────"
+          echo "  version:       ${VERSION}"
+          echo "  tag:           ${TAG}"
+          echo "  channel:       ${CHANNEL}"
+          echo "  is_prerelease: ${IS_PRERELEASE}"
+          echo "  is_draft:      ${IS_DRAFT}"
+          echo "  display_name:  ${DISPLAY_NAME}"
+          echo "────────────────────────────────────────"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 2 — Build self-contained EXE (x64 + arm64)
+  # ───────────────────────────────────────────────────────────────────────────
+  build-exe:
+    name: Build EXE · ${{ matrix.arch_label }}
+    needs: version
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid:        win-x64
+            arch_label: x64
+          - rid:        win-arm64
+            arch_label: arm64
+
+    steps:
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
-
-      - name: Determine tag and version
-        id: version
-        shell: bash
-        run: |
-          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          else
-            TAG="${GITHUB_REF_NAME:-}"
-          fi
-
-          VERSION="${TAG#v}"
-          if [ -z "$VERSION" ]; then
-            VERSION="0.0.0"
-          fi
-
-          # --- WiX version sanitization ---
-          WIX_VERSION=$(echo "$VERSION" | sed 's/[^0-9\.]//g')
-          PARTS=$(echo "$WIX_VERSION" | awk -F. '{print NF}')
-          while [ "$PARTS" -lt 4 ]; do
-            WIX_VERSION="${WIX_VERSION}.0"
-            PARTS=$((PARTS+1))
-          done
-          if [ "$PARTS" -gt 4 ]; then
-            WIX_VERSION=$(echo "$WIX_VERSION" | cut -d. -f1-4)
-          fi
-
-          echo "TAG=$TAG" >> $GITHUB_ENV
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "WIX_VERSION=$WIX_VERSION" >> $GITHUB_ENV
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore
-        run: dotnet restore "${{ env.PROJECT_PATH }}"
+        run: dotnet restore ${{ env.PROJECT_PATH }}
 
-      - name: Debug publish command
-        run: echo dotnet publish "${{ env.PROJECT_PATH }}" -c Release -r $RID --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false -o $PUBLISH_DIR
-        shell: bash
-
-      - name: Publish self-contained single-file
-        shell: powershell
+      - name: Publish single-file EXE
+        shell: pwsh
         run: |
-          dotnet publish "${{ env.PROJECT_PATH }}" -c Release -r ${{ matrix.runtime }} --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false -o publish/${{ matrix.runtime }}
-          mkdir -p "${{ env.OUTPUT_DIR }}/${{ matrix.runtime }}"
-          cp "publish/${{ matrix.runtime }}/${{ env.APP_NAME }}.exe" "${{ env.OUTPUT_DIR }}/${{ matrix.runtime }}/"
+          # Strip pre-release suffix for AssemblyVersion (must be x.y.z.w)
+          $ver = "${{ needs.version.outputs.version }}" -replace '-.*',''
+          dotnet publish ${{ env.PROJECT_PATH }} `
+            --configuration Release `
+            --runtime ${{ matrix.rid }} `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:Version="${{ needs.version.outputs.version }}" `
+            -p:AssemblyVersion="${ver}" `
+            -p:FileVersion="${ver}" `
+            -p:InformationalVersion="${{ needs.version.outputs.version }}" `
+            --output "publish/${{ matrix.rid }}"
 
-      - name: Install WiX Toolset
-        shell: powershell
-        run: choco install wixtoolset -y
-
-      - name: Persist UpgradeCode
-        shell: powershell
+      - name: Rename EXE
+        shell: pwsh
         run: |
-          $upgradeFile = ".github/upgrade_code.txt"
-          $code = $null
+          $channel = "${{ needs.version.outputs.channel }}"
+          $suffix  = if ($channel -ne "stable") { "-$channel" } else { "" }
+          $src = "publish/${{ matrix.rid }}/${{ env.APP_NAME }}.exe"
+          $dst = "publish/${{ matrix.rid }}/${{ env.APP_NAME }}-${{ matrix.arch_label }}${suffix}.exe"
+          Move-Item $src $dst -Force
+          Write-Host "→ $dst"
 
-          if ($env:UPGRADE_CODE) {
-            $code = $env:UPGRADE_CODE.Trim()
-            Write-Host "Using UPGRADE_CODE from workflow env."
-          } elseif (Test-Path $upgradeFile) {
-            Write-Host "Reading UpgradeCode from $upgradeFile"
-            $code = (Get-Content $upgradeFile -Raw).Trim()
-          }
-
-          if (-not $code) {
-            Write-Host "No UpgradeCode found; generating a new GUID."
-            $code = [guid]::NewGuid().ToString("B").ToUpper()
-            New-Item -ItemType Directory -Path ".github" -Force | Out-Null
-            Set-Content -Path $upgradeFile -Value $code -Encoding UTF8
-
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add $upgradeFile
-            git commit -m "chore: persist WiX UpgradeCode for installer"
-            if ($LASTEXITCODE -ne 0) { Write-Host "No changes to commit." }
-            git push origin HEAD:$env:GITHUB_REF
-            if ($LASTEXITCODE -ne 0) { Write-Host "Push failed; ensure workflow has push permission." }
-          } else {
-            Write-Host "Using UpgradeCode: $code"
-          }
-
-          Add-Content -Path $env:GITHUB_ENV -Value "UPGRADE_CODE=$code"
-
-      - name: Generate component GUIDs
-        id: guids
-        shell: powershell
-        run: |
-          $compMain = [guid]::NewGuid().ToString("B").ToUpper()
-          $compStart = [guid]::NewGuid().ToString("B").ToUpper()
-          $compDesktop = [guid]::NewGuid().ToString("B").ToUpper()
-          echo "COMP_GUID_MAIN=$compMain" >> $env:GITHUB_ENV
-          echo "COMP_GUID_START=$compStart" >> $env:GITHUB_ENV
-          echo "COMP_GUID_DESKTOP=$compDesktop" >> $env:GITHUB_ENV
-          Write-Host "Generated component GUIDs."
-
-      - name: Prepare WiX files and assets
-        shell: powershell
-        run: |
-          $RID = "${{ matrix.runtime }}"
-          $MSI_DIR = "${{ env.OUTPUT_DIR }}\$RID"
-          New-Item -ItemType Directory -Path $MSI_DIR -Force | Out-Null
-
-          # Handle icon
-          $iconSource = "Assets/app.ico"
-          $iconDest = "$MSI_DIR\app.ico"
-          if (Test-Path $iconSource) {
-            Copy-Item $iconSource -Destination $iconDest -Force
-            $iconPath = (Resolve-Path $iconDest).Path
-          } else {
-            Write-Host "Warning: $iconSource not found. ARP icon will be missing."
-            $iconPath = $null
-          }
-
-          $exePath = (Resolve-Path "publish\$RID\${{ env.APP_NAME }}.exe").Path
-          $wixVersion = $env:WIX_VERSION
-          $version = "${{ env.VERSION }}"
-          $appName = "${{ env.APP_NAME }}"
-          $manufacturer = "${{ env.MANUFACTURER }}"
-          $exeFileName = "${{ env.APP_NAME }}.exe"
-          $upgradeCode = "${{ env.UPGRADE_CODE }}"
-
-          # Compile .wxs into .wixobj
-          candle.exe -dWIX_VERSION=$wixVersion artifacts/$rid/Product.wxs -o artifacts/$rid/Product.wixobj
-
-          # Link into MSI
-          light.exe -dWIX_VERSION=$wixVersion artifacts/$rid/Product.wixobj -o artifacts/$rid/GeminiChat-$rid-$version.msi
-
-          # Build conditional XML elements
-          $iconLine = if ($iconPath) { "<File Id=""filIcon"" Source=""$iconPath"" />" } else { "" }
-          $iconProperty = if ($iconPath) { "<Icon Id=""AppIcon.ico"" SourceFile=""$iconPath"" />" } else { "" }
-
-          # WiX XML - Start from column 0 to avoid embedding spaces
-          $wxs = @"
-          <?xml version="1.0" encoding="UTF-8"?>
-          <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-            <Product Id="*" Name="$appName" Language="1033" Version="$(var.WIX_VERSION)" Manufacturer="$manufacturer" UpgradeCode="$upgradeCode">
-              <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
-              <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
-              <MediaTemplate />
-              <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
-              <Directory Id="TARGETDIR" Name="SourceDir">
-                <Directory Id="ProgramFilesFolder">
-                  <Directory Id="INSTALLFOLDER" Name="$appName" />
-                </Directory>
-                <Directory Id="ProgramMenuFolder">
-                  <Directory Id="ApplicationProgramsFolder" Name="$appName" />
-                </Directory>
-                <Directory Id="DesktopFolder" />
-              </Directory>
-              <DirectoryRef Id="INSTALLFOLDER">
-                <Component Id="cmpMainExe" Guid="$($env:COMP_GUID_MAIN)">
-                  <File Id="filExe" Source="$exePath" KeyPath="yes" Checksum="yes" />
-                  $iconLine
-                </Component>
-              </DirectoryRef>
-              <DirectoryRef Id="ApplicationProgramsFolder">
-                <Component Id="cmpStartMenuShortcut" Guid="$($env:COMP_GUID_START)">
-                  <Shortcut Id="StartMenuShortcut" Name="$appName" Description="Launch $appName" Target="[INSTALLFOLDER]$exeFileName" WorkingDirectory="INSTALLFOLDER" />
-                  <RemoveFolder Id="RemoveProgramsFolder" On="uninstall" />
-                  <RegistryValue Root="HKCU" Key="Software\$manufacturer\$appName" Name="installed" Type="integer" Value="1" KeyPath="yes" />
-                </Component>
-              </DirectoryRef>
-              <DirectoryRef Id="DesktopFolder">
-                <Component Id="cmpDesktopShortcut" Guid="$($env:COMP_GUID_DESKTOP)">
-                  <Shortcut Id="DesktopShortcut" Name="$appName" Description="Launch $appName" Target="[INSTALLFOLDER]$exeFileName" WorkingDirectory="INSTALLFOLDER" />
-                  <RemoveFolder Id="RemoveDesktopFolder" On="uninstall" />
-                  <RegistryValue Root="HKCU" Key="Software\$manufacturer\$appName" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
-                </Component>
-              </DirectoryRef>
-              $iconProperty
-              <Feature Id="ProductFeature" Title="$appName" Level="1">
-                <ComponentRef Id="cmpMainExe" />
-                <ComponentRef Id="cmpStartMenuShortcut" />
-                <ComponentRef Id="cmpDesktopShortcut" />
-              </Feature>
-            </Product>
-          </Wix>
-          "@
-          $wxsPath = "$MSI_DIR\Product.wxs"
-          $wxs | Out-File -FilePath $wxsPath -Encoding UTF8
-          Write-Host "WiX file created successfully at $wxsPath with UpgradeCode: $upgradeCode"
-
-      - name: Build MSI with WiX
-        shell: powershell
-        run: |
-          $RID = "${{ matrix.runtime }}"
-          $MSI_DIR = "${{ env.OUTPUT_DIR }}\$RID"
-          Push-Location $MSI_DIR
-          candle.exe Product.wxs -o Product.wixobj
-          light.exe Product.wixobj -o "${{ env.APP_NAME }}-$RID-${{ env.VERSION }}.msi"
-          Pop-Location
-          Write-Host "MSI created: ${{ env.APP_NAME }}-$RID-${{ env.VERSION }}.msi"
-
-      - name: Upload build artifacts
+      - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build-${{ matrix.runtime }}
-          path: ${{ env.OUTPUT_DIR }}/${{ matrix.runtime }}
+          name: exe-${{ matrix.rid }}
+          path: publish/${{ matrix.rid }}/*.exe
+          retention-days: 3
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 3 — Build MSI installer (x64 + arm64) using WiX Toolset v5
+  # ───────────────────────────────────────────────────────────────────────────
+  build-msi:
+    name: Build MSI · ${{ matrix.arch_label }}
+    needs: version
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid:        win-x64
+            arch_label: x64
+            wix_arch:   x64
+          - rid:        win-arm64
+            arch_label: arm64
+            wix_arch:   arm64
+
     steps:
-      - name: Download artifacts
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install WiX v5 + UI extension
+        run: |
+          dotnet tool install --global wix
+          wix extension add --global WixToolset.UI.wixext
+
+      - name: Restore
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Publish for MSI (non-single-file so WiX can enumerate files)
+        shell: pwsh
+        run: |
+          $ver = "${{ needs.version.outputs.version }}" -replace '-.*',''
+          dotnet publish ${{ env.PROJECT_PATH }} `
+            --configuration Release `
+            --runtime ${{ matrix.rid }} `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:Version="${{ needs.version.outputs.version }}" `
+            -p:AssemblyVersion="${ver}" `
+            -p:FileVersion="${ver}" `
+            -p:InformationalVersion="${{ needs.version.outputs.version }}" `
+            --output "msi-src/${{ matrix.rid }}"
+
+      - name: Generate WiX product descriptor
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path wix | Out-Null
+
+          # WiX requires numeric-only version (strip pre-release suffix)
+          $msiVersion = "${{ needs.version.outputs.version }}" -replace '-.*',''
+          $channel    = "${{ needs.version.outputs.channel }}"
+          $rid        = "${{ matrix.rid }}"
+          $arch       = "${{ matrix.wix_arch }}"
+          $appName    = "${{ env.APP_NAME }}"
+
+          # Use a different install folder name per channel so alpha/beta
+          # can coexist alongside a stable install
+          $folderSuffix = if ($channel -ne "stable") { " ($channel)" } else { "" }
+          $installFolder = "${appName}${folderSuffix}"
+
+          # Stable and pre-release get different UpgradeCodes so they
+          # don't overwrite each other during major version transitions
+          $upgradeCode = if ($channel -eq "stable") {
+            "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+          } else {
+            "B2C3D4E5-F6A7-8901-BCDE-F01234567891"
+          }
+
+          $wxs = @"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+               xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+            <Package Name="${appName}${folderSuffix}"
+                     Manufacturer="GeminiChat"
+                     Version="${msiVersion}"
+                     UpgradeCode="${upgradeCode}"
+                     Scope="perUser">
+
+              <MajorUpgrade
+                DowngradeErrorMessage="A newer version of [ProductName] is already installed.
+          Please uninstall it first." />
+
+              <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+              <ui:WixUI Id="WixUI_InstallDir" />
+              <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+
+              <Feature Id="ProductFeature" Title="${appName}" Level="1">
+                <ComponentGroupRef Id="AppFiles" />
+                <ComponentGroupRef Id="Shortcuts" />
+              </Feature>
+
+              <!-- Install to %LocalAppData%\GeminiChat (no admin needed) -->
+              <StandardDirectory Id="LocalAppDataFolder">
+                <Directory Id="INSTALLFOLDER" Name="${installFolder}" />
+              </StandardDirectory>
+
+              <StandardDirectory Id="DesktopFolder" />
+              <StandardDirectory Id="ProgramMenuFolder">
+                <Directory Id="ProgramMenuSubfolder" Name="${installFolder}" />
+              </StandardDirectory>
+
+              <!-- Harvest all published files -->
+              <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+                <Files Include="msi-src\${rid}\**" />
+              </ComponentGroup>
+
+              <!-- Shortcuts as a separate component group -->
+              <ComponentGroup Id="Shortcuts" Directory="INSTALLFOLDER">
+                <Component Id="ShortcutComp" Guid="C3D4E5F6-A7B8-9012-CDEF-012345678902">
+                  <Shortcut Id="DesktopShortcut"
+                            Directory="DesktopFolder"
+                            Name="${installFolder}"
+                            Target="[INSTALLFOLDER]${appName}.exe"
+                            WorkingDirectory="INSTALLFOLDER"
+                            Advertise="no" />
+                  <Shortcut Id="StartShortcut"
+                            Directory="ProgramMenuSubfolder"
+                            Name="${appName}"
+                            Target="[INSTALLFOLDER]${appName}.exe"
+                            WorkingDirectory="INSTALLFOLDER"
+                            Advertise="no" />
+                  <RemoveFolder Id="CleanupMenu"
+                                Directory="ProgramMenuSubfolder"
+                                On="uninstall" />
+                  <RegistryValue Root="HKCU"
+                                 Key="Software\GeminiChat"
+                                 Name="installed"
+                                 Type="integer"
+                                 Value="1"
+                                 KeyPath="yes" />
+                </Component>
+              </ComponentGroup>
+
+            </Package>
+          </Wix>
+          "@
+
+          Set-Content -Path "wix/Product.wxs" -Value $wxs -Encoding UTF8
+          Write-Host "Generated wix/Product.wxs (channel=$channel, arch=$arch)"
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $channel   = "${{ needs.version.outputs.channel }}"
+          $suffix    = if ($channel -ne "stable") { "-$channel" } else { "" }
+          $archLabel = "${{ matrix.arch_label }}"
+          $appName   = "${{ env.APP_NAME }}"
+          $outName   = "${appName}-${archLabel}${suffix}.msi"
+
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          wix build wix/Product.wxs `
+            -arch ${{ matrix.wix_arch }} `
+            -o "dist/$outName"
+
+          Write-Host "→ dist/$outName"
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-${{ matrix.rid }}
+          path: dist/*.msi
+          retention-days: 3
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 4 — Create GitHub Release and attach all assets
+  # ───────────────────────────────────────────────────────────────────────────
+  release:
+    name: Publish GitHub Release
+    needs: [version, build-exe, build-msi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Determine tag and prerelease flag
-        id: meta
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Build release notes
         shell: bash
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          else
-            TAG="${GITHUB_REF_NAME:-}"
-          fi
-          INPUT_PRERELEASE="${{ github.event.inputs.prerelease || 'false' }}"
-          if echo "$TAG" | grep -qi -- '-rc'; then
-            PRERELEASE=true
-          elif [ "$INPUT_PRERELEASE" = "true" ] || [ "$INPUT_PRERELEASE" = "True" ]; then
-            PRERELEASE=true
-          else
-            PRERELEASE=false
-          fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+          VERSION="${{ needs.version.outputs.version }}"
+          CHANNEL="${{ needs.version.outputs.channel }}"
+          IS_PRE="${{ needs.version.outputs.is_prerelease }}"
+          DISPLAY="${{ needs.version.outputs.display_name }}"
 
-      - name: Create GitHub Release and upload assets
-        uses: ncipollo/release-action@v1
+          # ── Channel banner ──────────────────────────────────────────────
+          case "${CHANNEL}" in
+            alpha)
+              BANNER="⚠️ **Alpha Release** — Early preview. May be unstable or incomplete. Not recommended for production use."
+              ;;
+            beta)
+              BANNER="🔶 **Beta Release** — Feature-complete but may contain bugs. Feedback welcome."
+              ;;
+            rc)
+              BANNER="🔷 **Release Candidate** — Final pre-release build. Please test and report issues before the stable release."
+              ;;
+            preview)
+              BANNER="🔵 **Preview Release** — Showcases upcoming features. May change before stable."
+              ;;
+            stable)
+              BANNER="✅ **Stable Release** — Recommended for all users."
+              ;;
+            *)
+              BANNER="⚠️ **Pre-release** — Use with caution."
+              ;;
+          esac
+
+          # ── File names depend on channel suffix ─────────────────────────
+          if [[ "${CHANNEL}" == "stable" ]]; then
+            SUFFIX=""
+          else
+            SUFFIX="-${CHANNEL}"
+          fi
+
+          cat > release_notes.md << EOMD
+          ## ${DISPLAY}
+
+          ${BANNER}
+
+          ---
+
+          ### 📦 Downloads
+
+          | File | Architecture | Format | Notes |
+          |------|-------------|--------|-------|
+          | \`GeminiChat-x64${SUFFIX}.exe\` | Windows 11 x86-64 | Portable EXE | No install needed |
+          | \`GeminiChat-arm64${SUFFIX}.exe\` | Windows 11 ARM64 | Portable EXE | No install needed |
+          | \`GeminiChat-x64${SUFFIX}.msi\` | Windows 11 x86-64 | MSI Installer | Desktop + Start Menu shortcuts |
+          | \`GeminiChat-arm64${SUFFIX}.msi\` | Windows 11 ARM64 | MSI Installer | Desktop + Start Menu shortcuts |
+
+          > **Which file?** Most Windows PCs use x64. ARM64 is for Surface Pro X, Snapdragon X Elite, and other Copilot+ PCs.
+          > The MSI installs to \`%LocalAppData%\\GeminiChat\` — no administrator rights required.
+
+          ---
+
+          ### 🤖 Supported Models
+
+          | Model | API ID | Channel |
+          |-------|--------|---------|
+          | Gemini 2.5 Flash | \`gemini-2.5-flash\` | ⚡ Fast |
+          | Gemini 2.5 Pro | \`gemini-2.5-pro\` | 🧠 Powerful |
+          | Gemini 2.5 Flash Lite | \`gemini-2.5-flash-lite\` | ⚡⚡ Ultra-fast |
+          | Gemini 3 Flash | \`gemini-3-flash-preview\` | 🚀 Frontier |
+          | Gemini 3.1 Pro | \`gemini-3.1-pro-preview\` | 🌟 State-of-the-art |
+          | Gemini 3.1 Flash Lite | \`gemini-3.1-flash-lite-preview\` | ⚡⚡ Lite |
+
+          ---
+
+          ### 🚀 Getting Started
+
+          1. Download the \`.msi\` for your architecture and run it, or use the portable \`.exe\` directly
+          2. Get a free Gemini API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+          3. Launch **Gemini Chat**, paste your key and click **Validate & Save**
+
+          ---
+
+          ### ✨ Features
+
+          - Streaming responses in real time
+          - Persistent chat history across sessions
+          - Per-session model switching
+          - Adjustable temperature, max tokens, system prompt
+          - Stop generation mid-stream
+          - API key validated on entry — zero wasted requests
+          - Dark, modern UI
+
+          ---
+
+          **Full changelog:** [\`${VERSION}\`](../../commits/${{ needs.version.outputs.tag }})
+          EOMD
+
+          echo "Release notes written."
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          tag: ${{ steps.meta.outputs.tag != '' && steps.meta.outputs.tag || format('v{0}', github.run_number) }}
-          name: Release ${{ steps.meta.outputs.tag != '' && steps.meta.outputs.tag || format('v{0}', github.run_number) }}
-          prerelease: ${{ steps.meta.outputs.prerelease }}
-          artifacts: |
-            artifacts/windows-build-win-x64/*.exe
-            artifacts/windows-build-win-x64/*.msi
-            artifacts/windows-build-win-arm64/*.exe
-            artifacts/windows-build-win-arm64/*.msi
+          tag_name:      ${{ needs.version.outputs.tag }}
+          name:          ${{ needs.version.outputs.display_name }}
+          body_path:     release_notes.md
+          draft:         ${{ needs.version.outputs.is_draft }}
+          prerelease:    ${{ needs.version.outputs.is_prerelease }}
+          make_latest:   ${{ needs.version.outputs.is_prerelease == 'false' }}
+          files: |
+            artifacts/exe-win-x64/*.exe
+            artifacts/exe-win-arm64/*.exe
+            artifacts/msi-win-x64/*.msi
+            artifacts/msi-win-arm64/*.msi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
