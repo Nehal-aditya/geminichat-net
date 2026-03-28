@@ -12,7 +12,7 @@ on:
         default: 'false'
 
 env:
-  APP_NAME: "Gemini Chat"              # <<-- change this
+  APP_NAME: "GeminiChat"              # <<-- change this
   PROJECT_PATH: "GeminiChat.csproj" # <<-- change this
   MANUFACTURER: "Nehaladitya"            # <<-- change this
   OUTPUT_DIR: "artifacts"
