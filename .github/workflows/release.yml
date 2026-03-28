@@ -57,6 +57,10 @@ jobs:
       - name: Restore
         run: dotnet restore "${{ env.PROJECT_PATH }}"
 
+      - name: Debug publish command
+        run: echo dotnet publish "${{ env.PROJECT_PATH }}" -c Release -r $RID --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false -o $PUBLISH_DIR
+        shell: bash
+
       - name: Publish self-contained single-file
         shell: bash
         run: |
