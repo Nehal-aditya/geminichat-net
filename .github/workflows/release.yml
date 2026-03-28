@@ -3,13 +3,12 @@ name: Release
 # ─────────────────────────────────────────────────────────────────────────────
 # TRIGGER RULES
 #
-# Stable release:     git tag v1.2.3
-# Pre-release:        git tag v1.2.3-alpha.1
-#                     git tag v1.2.3-beta.2
-#                     git tag v1.2.3-rc.1
-#                     git tag v1.2.3-preview.1
+# Stable:    git tag v1.2.3   → push
+# Pre-release tags:
+#            v1.2.3-alpha.1   v1.2.3-beta.2
+#            v1.2.3-rc.1      v1.2.3-preview.1
 #
-# Manual (UI):        Actions → Release → Run workflow
+# Manual:    Actions → Release → Run workflow
 # ─────────────────────────────────────────────────────────────────────────────
 on:
   push:
@@ -31,12 +30,7 @@ on:
         required: true
         type: choice
         default: stable
-        options:
-          - stable
-          - alpha
-          - beta
-          - rc
-          - preview
+        options: [stable, alpha, beta, rc, preview]
       draft:
         description: 'Publish as draft (review before going live)'
         required: true
@@ -50,11 +44,9 @@ env:
   PROJECT_PATH:                GeminiChat.csproj
   DOTNET_NOLOGO:               true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
-  # Pin WiX v5 and its UI extension to matching versions.
-  # v5.0.2 is the last stable v5 CLI release.
-  # WixToolset.UI.wixext 5.0.1 is the matching stable extension.
   WIX_VERSION:                 '5.0.2'
   WIX_UI_EXT_VERSION:          '5.0.1'
+  APP_ICON:                    Assets/app.ico
 
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
@@ -79,7 +71,6 @@ jobs:
         id: resolve
         shell: bash
         run: |
-          # ── Raw version ──────────────────────────────────────────────────
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             VERSION="${TAG#v}"
@@ -94,7 +85,6 @@ jobs:
             TAG="v${VERSION}"
           fi
 
-          # ── Channel detection ────────────────────────────────────────────
           IS_PRERELEASE="false"
           CHANNEL="stable"
           if   [[ "${VERSION}" == *"-alpha"*   ]]; then CHANNEL="alpha";   IS_PRERELEASE="true"
@@ -104,11 +94,9 @@ jobs:
           elif [[ "${VERSION}" == *"-"*        ]]; then CHANNEL="pre";     IS_PRERELEASE="true"
           fi
 
-          # ── MSI version must be purely numeric (x.y.z) ──────────────────
-          # Strip everything from the first hyphen onward
+          # MSI version must be purely numeric — strip pre-release suffix
           MSI_VERSION="${VERSION%%-*}"
 
-          # ── Display name ─────────────────────────────────────────────────
           case "${CHANNEL}" in
             alpha)   DISPLAY="Gemini Chat v${VERSION} (Alpha)" ;;
             beta)    DISPLAY="Gemini Chat v${VERSION} (Beta)" ;;
@@ -118,18 +106,18 @@ jobs:
             *)       DISPLAY="Gemini Chat v${VERSION}" ;;
           esac
 
-          echo "version=${VERSION}"           >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG}"                   >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}"             >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"                     >> "$GITHUB_OUTPUT"
           echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
-          echo "channel=${CHANNEL}"           >> "$GITHUB_OUTPUT"
-          echo "is_draft=${IS_DRAFT}"         >> "$GITHUB_OUTPUT"
-          echo "display_name=${DISPLAY}"      >> "$GITHUB_OUTPUT"
-          echo "msi_version=${MSI_VERSION}"   >> "$GITHUB_OUTPUT"
+          echo "channel=${CHANNEL}"             >> "$GITHUB_OUTPUT"
+          echo "is_draft=${IS_DRAFT}"           >> "$GITHUB_OUTPUT"
+          echo "display_name=${DISPLAY}"        >> "$GITHUB_OUTPUT"
+          echo "msi_version=${MSI_VERSION}"     >> "$GITHUB_OUTPUT"
 
           echo "version=${VERSION}  tag=${TAG}  channel=${CHANNEL}  msi_version=${MSI_VERSION}"
 
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 2 — Build self-contained EXE (x64 + arm64)
+  # JOB 2 — Build portable single-file EXE (x64 + arm64)
   # ───────────────────────────────────────────────────────────────────────────
   build-exe:
     name: Build EXE · ${{ matrix.arch_label }}
@@ -167,6 +155,7 @@ jobs:
             -p:PublishSingleFile=true `
             -p:EnableCompressionInSingleFile=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:ApplicationIcon="${{ env.APP_ICON }}" `
             -p:Version="${{ needs.version.outputs.version }}" `
             -p:AssemblyVersion="$msiVer" `
             -p:FileVersion="$msiVer" `
@@ -178,10 +167,11 @@ jobs:
         run: |
           $channel = "${{ needs.version.outputs.channel }}"
           $suffix  = if ($channel -ne "stable") { "-$channel" } else { "" }
-          $src = "publish/${{ matrix.rid }}/${{ env.APP_NAME }}.exe"
-          $dst = "publish/${{ matrix.rid }}/${{ env.APP_NAME }}-${{ matrix.arch_label }}${suffix}.exe"
+          $src     = "publish/${{ matrix.rid }}/${{ env.APP_NAME }}.exe"
+          $dst     = "publish/${{ matrix.rid }}/${{ env.APP_NAME }}-${{ matrix.arch_label }}${suffix}.exe"
+          if (-not (Test-Path $src)) { throw "EXE not found at: $src" }
           Move-Item $src $dst -Force
-          Write-Host "Artifact: $dst"
+          Write-Host "Artifact: $dst  ($([int](Get-Item $dst).Length / 1MB) MB)"
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
@@ -191,7 +181,13 @@ jobs:
           retention-days: 3
 
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 3 — Build MSI installer (x64 + arm64) using pinned WiX v5.0.2
+  # JOB 3 — Build MSI installer (x64 + arm64)
+  #
+  # KEY FIX: We publish with PublishSingleFile=true so the output is exactly
+  # one .exe file. The WXS then references it explicitly with <File Source=...>
+  # keyed as KeyPath="yes", and both shortcuts point at [#MainExe] (the MSI
+  # property that resolves to the installed file path). This eliminates the
+  # "missing target" shortcut error caused by glob harvesting.
   # ───────────────────────────────────────────────────────────────────────────
   build-msi:
     name: Build MSI · ${{ matrix.arch_label }}
@@ -221,44 +217,44 @@ jobs:
       - name: Install WiX CLI v${{ env.WIX_VERSION }}
         run: dotnet tool install --global wix --version ${{ env.WIX_VERSION }}
 
-      # ── Download WixToolset.UI.wixext 5.0.1 via NuGet directly ───────────
-      # We do NOT use `wix extension add` because it ignores version pins
-      # and can pull incompatible prerelease versions.
-      # Instead we download the .nupkg from NuGet and reference the DLL directly.
-      - name: Download WixToolset.UI.wixext v${{ env.WIX_UI_EXT_VERSION }}
+      # ── Fetch WixToolset.UI.wixext 5.0.1 directly from NuGet ─────────────
+      # Avoids `wix extension add` which ignores version pins and can pull
+      # incompatible prerelease builds.
+      - name: Fetch WixToolset.UI.wixext v${{ env.WIX_UI_EXT_VERSION }}
         shell: pwsh
         run: |
-          $pkg  = "WixToolset.UI.wixext"
-          $ver  = "${{ env.WIX_UI_EXT_VERSION }}"
-          $dest = "wixext"
+          $pkg   = "WixToolset.UI.wixext"
+          $ver   = "${{ env.WIX_UI_EXT_VERSION }}"
+          $dest  = "wixext"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
-          # Download the .nupkg (it is just a zip)
-          $url  = "https://www.nuget.org/api/v2/package/$pkg/$ver"
+          $url   = "https://www.nuget.org/api/v2/package/$pkg/$ver"
           $nupkg = "$dest/$pkg.$ver.nupkg"
-          Invoke-WebRequest -Uri $url -OutFile $nupkg
-          Write-Host "Downloaded $nupkg"
+          Invoke-WebRequest -Uri $url -OutFile $nupkg -UseBasicParsing
+          Write-Host "Downloaded: $nupkg"
 
-          # Extract and locate the wixext5 DLL
           Expand-Archive -Path $nupkg -DestinationPath "$dest/extracted" -Force
-          $dll = Get-ChildItem -Path "$dest/extracted" -Filter "*.dll" -Recurse |
+
+          # Look for the wixext5 subfolder first (correct for WiX v5)
+          $dll = Get-ChildItem "$dest/extracted" -Filter "WixToolset.UI.wixext.dll" -Recurse |
                    Where-Object { $_.FullName -match "wixext5" } |
                    Select-Object -First 1
+
           if (-not $dll) {
-            # Fallback: find any DLL with the extension name
-            $dll = Get-ChildItem -Path "$dest/extracted" -Filter "WixToolset.UI.wixext.dll" -Recurse |
+            # Fallback: any DLL with that name
+            $dll = Get-ChildItem "$dest/extracted" -Filter "WixToolset.UI.wixext.dll" -Recurse |
                      Select-Object -First 1
           }
-          if (-not $dll) { throw "Could not find WixToolset.UI.wixext.dll in package" }
+          if (-not $dll) { throw "WixToolset.UI.wixext.dll not found in package" }
 
-          Write-Host "UI extension DLL: $($dll.FullName)"
-          # Save path for later steps
-          "$($dll.FullName)" | Out-File -FilePath "wixext/ui_ext_dll.txt" -Encoding utf8
+          Write-Host "UI ext DLL → $($dll.FullName)"
+          $dll.FullName | Out-File "wixext/ui_ext_dll.txt" -Encoding utf8 -NoNewline
 
       - name: Restore app
         run: dotnet restore ${{ env.PROJECT_PATH }}
 
-      - name: Publish app for MSI packaging
+      # ── IMPORTANT: publish as single-file so we get exactly one .exe ──────
+      - name: Publish app (single-file for MSI)
         shell: pwsh
         run: |
           $msiVer = "${{ needs.version.outputs.msi_version }}"
@@ -266,44 +262,60 @@ jobs:
             --configuration Release `
             --runtime ${{ matrix.rid }} `
             --self-contained true `
-            -p:PublishSingleFile=false `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:ApplicationIcon="${{ env.APP_ICON }}" `
             -p:Version="${{ needs.version.outputs.version }}" `
             -p:AssemblyVersion="$msiVer" `
             -p:FileVersion="$msiVer" `
             -p:InformationalVersion="${{ needs.version.outputs.version }}" `
             --output "msi-src/${{ matrix.rid }}"
 
+          # Verify the exe exists before continuing
+          $exe = "msi-src/${{ matrix.rid }}/${{ env.APP_NAME }}.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Host "Contents of msi-src/${{ matrix.rid }}:"
+            Get-ChildItem "msi-src/${{ matrix.rid }}" | ForEach-Object { Write-Host "  $($_.Name)" }
+            throw "Expected EXE not found: $exe"
+          }
+          Write-Host "EXE ready: $exe  ($([int](Get-Item $exe).Length / 1MB) MB)"
+
       - name: Generate Product.wxs
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path wix | Out-Null
 
-          $msiVersion = "${{ needs.version.outputs.msi_version }}"
-          $channel    = "${{ needs.version.outputs.channel }}"
-          $rid        = "${{ matrix.rid }}"
-          $appName    = "${{ env.APP_NAME }}"
+          $msiVersion  = "${{ needs.version.outputs.msi_version }}"
+          $channel     = "${{ needs.version.outputs.channel }}"
+          $rid         = "${{ matrix.rid }}"
+          $appName     = "${{ env.APP_NAME }}"
+          $exeSrc      = "${{ github.workspace }}\msi-src\$rid\$appName.exe"
+          $icoSrc      = "${{ github.workspace }}\${{ env.APP_ICON }}"
 
-          # Stable and pre-release installs use different names + upgrade codes
-          # so they can coexist side-by-side on the same machine
-          $nameSuffix   = if ($channel -ne "stable") { " ($channel)" } else { "" }
-          $displayName  = "${appName}${nameSuffix}"
-          $upgradeCode  = if ($channel -eq "stable") {
+          # Stable and pre-release use different upgrade codes so they
+          # can coexist side-by-side on the same machine.
+          $nameSuffix  = if ($channel -ne "stable") { " ($channel)" } else { "" }
+          $displayName = "${appName}${nameSuffix}"
+          $upgradeCode = if ($channel -eq "stable") {
             "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
           } else {
             "B2C3D4E5-F6A7-8901-BCDE-F01234567891"
           }
 
-          # WiX v5 schema uses http://wixtoolset.org/schemas/v4/wxs (same namespace as v4)
+          # Registry key suffix so stable+prerelease don't collide in HKCU
+          $regKey = "Software\GeminiChat\$channel"
+
           $wxs = @"
           <?xml version="1.0" encoding="UTF-8"?>
           <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-               xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+              xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
-            <Package Name="${displayName}"
-                     Manufacturer="GeminiChat"
-                     Version="${msiVersion}"
-                     UpgradeCode="${upgradeCode}"
-                     Scope="perUser">
+            <Package Name="$displayName"
+                    Manufacturer="GeminiChat"
+                    Version="$msiVersion"
+                    UpgradeCode="$upgradeCode"
+                    Scope="perUser">
 
               <MajorUpgrade
                 DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first." />
@@ -311,78 +323,114 @@ jobs:
               <ui:WixUI Id="WixUI_InstallDir" />
               <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
 
-              <Feature Id="MainFeature" Title="${appName}" Level="1">
-                <ComponentGroupRef Id="AppFiles" />
-                <ComponentGroupRef Id="AppShortcuts" />
+              <!--
+                Icon declaration: WiX embeds the ICO into the MSI and uses it for
+                Add/Remove Programs entry. The Id must end in ".exe" or ".ico" so
+                WiX knows the resource type.
+              -->
+              <Icon Id="AppIcon.ico" SourceFile="$icoSrc" />
+              <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+
+              <Feature Id="MainFeature" Title="$appName" Level="1">
+                <ComponentRef Id="MainExeComponent" />
+                <ComponentRef Id="ShortcutComponent" />
               </Feature>
 
+              <!-- Install to %LocalAppData%\GeminiChat  (no admin required) -->
               <StandardDirectory Id="LocalAppDataFolder">
-                <Directory Id="INSTALLFOLDER" Name="${displayName}" />
+                <Directory Id="INSTALLFOLDER" Name="$displayName" />
               </StandardDirectory>
               <StandardDirectory Id="DesktopFolder" />
               <StandardDirectory Id="ProgramMenuFolder">
-                <Directory Id="AppMenuFolder" Name="${displayName}" />
+                <Directory Id="AppMenuFolder" Name="$displayName" />
               </StandardDirectory>
 
-              <!-- Harvest all published output files automatically -->
-              <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
-                <Files Include="msi-src\${rid}\**" />
-              </ComponentGroup>
+              <!--
+                MainExeComponent:
+                - Explicitly references the single published EXE by full source path.
+                - KeyPath="yes" on the <File> element means the MSI tracks this file
+                  directly; the shortcuts below reference [#MainExe] which resolves
+                  to the correct installed path. This is what fixes the broken shortcut.
+              -->
+              <Component Id="MainExeComponent"
+                        Directory="INSTALLFOLDER"
+                        Guid="D4E5F6A7-B8C9-0123-DEFA-123456789003">
+                <File Id="MainExe"
+                      Source="$exeSrc"
+                      Name="$appName.exe"
+                      KeyPath="yes" />
+              </Component>
 
-              <!-- Shortcuts + registry key that anchors the component -->
-              <ComponentGroup Id="AppShortcuts" Directory="INSTALLFOLDER">
-                <Component Id="ShortcutComponent"
-                           Guid="C3D4E5F6-A7B8-9012-CDEF-012345678902">
-                  <RegistryValue Root="HKCU"
-                                 Key="Software\GeminiChat\${channel}"
-                                 Name="Installed"
-                                 Type="integer"
-                                 Value="1"
-                                 KeyPath="yes" />
-                  <Shortcut Id="DesktopShortcut"
-                            Directory="DesktopFolder"
-                            Name="${displayName}"
-                            Target="[INSTALLFOLDER]${appName}.exe"
-                            WorkingDirectory="INSTALLFOLDER"
-                            Advertise="no" />
-                  <Shortcut Id="StartMenuShortcut"
-                            Directory="AppMenuFolder"
-                            Name="${appName}"
-                            Target="[INSTALLFOLDER]${appName}.exe"
-                            WorkingDirectory="INSTALLFOLDER"
-                            Advertise="no" />
-                  <RemoveFolder Id="RemoveAppMenuFolder"
-                                Directory="AppMenuFolder"
-                                On="uninstall" />
-                </Component>
-              </ComponentGroup>
+              <!--
+                ShortcutComponent:
+                - Shortcuts use Target="[#MainExe]" — the [#FileId] syntax tells the
+                  MSI engine to resolve to the installed location of that File element.
+                  This is the only reliable way to create shortcuts in per-user installs.
+                - Icon="AppIcon.ico" wires the embedded ICO to both shortcuts so they
+                  display the correct icon in the Start Menu and on the Desktop.
+                - Anchored by a registry value (required by WiX for non-advertised
+                  shortcuts without a file KeyPath in the same component).
+              -->
+              <Component Id="ShortcutComponent"
+                        Directory="INSTALLFOLDER"
+                        Guid="E5F6A7B8-C9D0-1234-EFAB-234567890014">
+                <RegistryValue Root="HKCU"
+                              Key="$regKey"
+                              Name="Installed"
+                              Type="integer"
+                              Value="1"
+                              KeyPath="yes" />
+                <Shortcut Id="DesktopShortcut"
+                          Directory="DesktopFolder"
+                          Name="$displayName"
+                          Target="[#MainExe]"
+                          WorkingDirectory="INSTALLFOLDER"
+                          Icon="AppIcon.ico"
+                          Advertise="no" />
+                <Shortcut Id="StartMenuShortcut"
+                          Directory="AppMenuFolder"
+                          Name="$appName"
+                          Target="[#MainExe]"
+                          WorkingDirectory="INSTALLFOLDER"
+                          Icon="AppIcon.ico"
+                          Advertise="no" />
+                <RemoveFolder Id="RemoveAppMenuFolder"
+                              Directory="AppMenuFolder"
+                              On="uninstall" />
+              </Component>
 
             </Package>
           </Wix>
           "@
 
           Set-Content -Path "wix/Product.wxs" -Value $wxs -Encoding UTF8
-          Write-Host "Generated Product.wxs  channel=$channel  arch=${{ matrix.wix_arch }}"
+          Write-Host "Generated Product.wxs"
+          Write-Host "  display : $displayName"
+          Write-Host "  exe src : $exeSrc"
+          Write-Host "  ico src : $icoSrc"
+          Write-Host "  channel : $channel"
+          Write-Host "  arch    : ${{ matrix.wix_arch }}"
 
       - name: Build MSI
         shell: pwsh
         run: |
-          $channel   = "${{ needs.version.outputs.channel }}"
-          $suffix    = if ($channel -ne "stable") { "-$channel" } else { "" }
-          $outName   = "${{ env.APP_NAME }}-${{ matrix.arch_label }}${suffix}.msi"
-          $uiExtDll  = Get-Content "wixext/ui_ext_dll.txt" -Raw | ForEach-Object { $_.Trim() }
+          $channel  = "${{ needs.version.outputs.channel }}"
+          $suffix   = if ($channel -ne "stable") { "-$channel" } else { "" }
+          $outName  = "${{ env.APP_NAME }}-${{ matrix.arch_label }}${suffix}.msi"
+          $uiExtDll = (Get-Content "wixext/ui_ext_dll.txt" -Raw).Trim()
 
           New-Item -ItemType Directory -Force -Path dist | Out-Null
 
-          Write-Host "Building MSI:  $outName"
-          Write-Host "UI ext DLL:    $uiExtDll"
+          Write-Host "Building: $outName"
+          Write-Host "UI ext:   $uiExtDll"
 
           wix build wix/Product.wxs `
             -arch ${{ matrix.wix_arch }} `
             -ext "$uiExtDll" `
             -o "dist/$outName"
 
-          Write-Host "Built: dist/$outName  ($('{0:N0}' -f (Get-Item "dist/$outName").Length) bytes)"
+          $size = '{0:N1}' -f ((Get-Item "dist/$outName").Length / 1MB)
+          Write-Host "Done: dist/$outName  (${size} MB)"
 
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
@@ -392,7 +440,7 @@ jobs:
           retention-days: 3
 
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 4 — Create GitHub Release with all assets attached
+  # JOB 4 — Create GitHub Release with all assets
   # ───────────────────────────────────────────────────────────────────────────
   release:
     name: Publish GitHub Release
@@ -441,10 +489,10 @@ jobs:
 
           | File | Architecture | Type |
           |------|-------------|------|
-          | \`GeminiChat-x64${SUFFIX}.exe\` | Windows 11 x86-64 | Portable — run directly, no install |
-          | \`GeminiChat-arm64${SUFFIX}.exe\` | Windows 11 ARM64 | Portable — run directly, no install |
-          | \`GeminiChat-x64${SUFFIX}.msi\` | Windows 11 x86-64 | Installer — Desktop + Start Menu shortcuts |
-          | \`GeminiChat-arm64${SUFFIX}.msi\` | Windows 11 ARM64 | Installer — Desktop + Start Menu shortcuts |
+          | \`GeminiChat-x64${SUFFIX}.exe\` | Windows 11 x86-64 | Portable — run directly |
+          | \`GeminiChat-arm64${SUFFIX}.exe\` | Windows 11 ARM64 | Portable — run directly |
+          | \`GeminiChat-x64${SUFFIX}.msi\` | Windows 11 x86-64 | Installer with shortcuts |
+          | \`GeminiChat-arm64${SUFFIX}.msi\` | Windows 11 ARM64 | Installer with shortcuts |
 
           > **Which file?** Most Windows PCs use **x64**. ARM64 is for Snapdragon X / Copilot+ PCs, Surface Pro X, etc.
           > The MSI installs to \`%LocalAppData%\\GeminiChat\` — no administrator rights required.
@@ -472,7 +520,7 @@ jobs:
 
           ---
 
-          **Full changelog:** compare [\`${VERSION}\`](../../commits/${{ needs.version.outputs.tag }})
+          **Full changelog:** [\`${VERSION}\`](../../commits/${{ needs.version.outputs.tag }})
           EOMD
 
       - name: Create GitHub Release
