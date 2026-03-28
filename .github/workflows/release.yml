@@ -72,38 +72,38 @@ jobs:
         shell: powershell
         run: choco install wixtoolset -y
 
-      - name: Ensure persistent UpgradeCode (generate if missing and persist)
-        id: ensure-upgrade
+      - name: Persist UpgradeCode
         shell: powershell
         run: |
           $upgradeFile = ".github/upgrade_code.txt"
-          $envUpgrade = ""
-          if ($env:UPGRADE_CODE) { $envUpgrade = $env:UPGRADE_CODE.Trim() }
-          if ($envUpgrade -and $envUpgrade -ne "") {
+          $code = $null
+
+          if ($env:UPGRADE_CODE) {
+            $code = $env:UPGRADE_CODE.Trim()
             Write-Host "Using UPGRADE_CODE from workflow env."
-            $code = $envUpgrade
           } elseif (Test-Path $upgradeFile) {
             Write-Host "Reading UpgradeCode from $upgradeFile"
             $code = (Get-Content $upgradeFile -Raw).Trim()
-            if (-not $code) { $code = $null }
-          } else {
-            $code = $null
           }
+
           if (-not $code) {
             Write-Host "No UpgradeCode found; generating a new GUID."
             $code = [guid]::NewGuid().ToString("B").ToUpper()
             New-Item -ItemType Directory -Path ".github" -Force | Out-Null
             Set-Content -Path $upgradeFile -Value $code -Encoding UTF8
+
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add $upgradeFile
-            git commit -m "chore: persist WiX UpgradeCode for installer" || Write-Host "No changes to commit."
-            git push origin HEAD:${GITHUB_REF##*/} || Write-Host "Push failed; ensure workflow has push permission."
-            Write-Host "Persisted UpgradeCode to $upgradeFile."
+            git commit -m "chore: persist WiX UpgradeCode for installer"
+            if ($LASTEXITCODE -ne 0) { Write-Host "No changes to commit." }
+            git push origin HEAD:$env:GITHUB_REF
+            if ($LASTEXITCODE -ne 0) { Write-Host "Push failed; ensure workflow has push permission." }
           } else {
             Write-Host "Using UpgradeCode: $code"
           }
-          echo "UPGRADE_CODE=$code" >> $env:GITHUB_ENV
+
+          Add-Content -Path $env:GITHUB_ENV -Value "UPGRADE_CODE=$code"
 
       - name: Generate component GUIDs
         id: guids
