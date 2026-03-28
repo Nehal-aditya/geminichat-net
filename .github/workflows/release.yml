@@ -3,31 +3,31 @@ name: Release
 # ─────────────────────────────────────────────────────────────────────────────
 # TRIGGER RULES
 #
-# Stable release:     git tag v1.2.3       → push to GitHub
-# Pre-release:        git tag v1.2.3-beta.1
-#                     git tag v1.2.3-alpha.2
+# Stable release:     git tag v1.2.3
+# Pre-release:        git tag v1.2.3-alpha.1
+#                     git tag v1.2.3-beta.2
 #                     git tag v1.2.3-rc.1
+#                     git tag v1.2.3-preview.1
 #
 # Manual (UI):        Actions → Release → Run workflow
-#                     Fill in version + choose release type
 # ─────────────────────────────────────────────────────────────────────────────
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'              # stable:     v1.2.3
-      - 'v[0-9]+.[0-9]+.[0-9]+-alpha*'       # alpha:      v1.2.3-alpha.1
-      - 'v[0-9]+.[0-9]+.[0-9]+-beta*'        # beta:       v1.2.3-beta.2
-      - 'v[0-9]+.[0-9]+.[0-9]+-rc*'          # release candidate: v1.2.3-rc.1
-      - 'v[0-9]+.[0-9]+.[0-9]+-preview*'     # preview:    v1.2.3-preview.1
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-alpha*'
+      - 'v[0-9]+.[0-9]+.[0-9]+-beta*'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc*'
+      - 'v[0-9]+.[0-9]+.[0-9]+-preview*'
 
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version number — e.g. 1.2.3 or 1.2.3-beta.1'
+        description: 'Version — e.g. 1.2.3 or 1.2.3-beta.1'
         required: true
         default: '1.0.0'
       release_type:
-        description: 'Release type'
+        description: 'Release channel'
         required: true
         type: choice
         default: stable
@@ -45,35 +45,41 @@ on:
 
 # ─────────────────────────────────────────────────────────────────────────────
 env:
-  APP_NAME:                  GeminiChat
-  DOTNET_VERSION:            '8.0.x'
-  PROJECT_PATH:              GeminiChat.csproj
-  DOTNET_NOLOGO:             true
+  APP_NAME:                    GeminiChat
+  DOTNET_VERSION:              '8.0.x'
+  PROJECT_PATH:                GeminiChat.csproj
+  DOTNET_NOLOGO:               true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  # Pin WiX v5 and its UI extension to matching versions.
+  # v5.0.2 is the last stable v5 CLI release.
+  # WixToolset.UI.wixext 5.0.1 is the matching stable extension.
+  WIX_VERSION:                 '5.0.2'
+  WIX_UI_EXT_VERSION:          '5.0.1'
 
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
 
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 1 — Resolve version, channel, and prerelease flag
+  # JOB 1 — Resolve version, channel, prerelease flag
   # ───────────────────────────────────────────────────────────────────────────
   version:
     name: Resolve Version & Channel
     runs-on: ubuntu-latest
     outputs:
-      version:      ${{ steps.resolve.outputs.version }}
-      tag:          ${{ steps.resolve.outputs.tag }}
+      version:       ${{ steps.resolve.outputs.version }}
+      tag:           ${{ steps.resolve.outputs.tag }}
       is_prerelease: ${{ steps.resolve.outputs.is_prerelease }}
-      channel:      ${{ steps.resolve.outputs.channel }}
-      is_draft:     ${{ steps.resolve.outputs.is_draft }}
-      display_name: ${{ steps.resolve.outputs.display_name }}
+      channel:       ${{ steps.resolve.outputs.channel }}
+      is_draft:      ${{ steps.resolve.outputs.is_draft }}
+      display_name:  ${{ steps.resolve.outputs.display_name }}
+      msi_version:   ${{ steps.resolve.outputs.msi_version }}
 
     steps:
       - name: Resolve version metadata
         id: resolve
         shell: bash
         run: |
-          # ── Determine raw version string ────────────────────────────────
+          # ── Raw version ──────────────────────────────────────────────────
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             VERSION="${TAG#v}"
@@ -82,18 +88,15 @@ jobs:
             VERSION="${{ github.event.inputs.version }}"
             RTYPE="${{ github.event.inputs.release_type }}"
             IS_DRAFT="${{ github.event.inputs.draft }}"
-
-            # Append channel suffix if not already in version string and not stable
             if [[ "${RTYPE}" != "stable" && "${VERSION}" != *"-"* ]]; then
               VERSION="${VERSION}-${RTYPE}.1"
             fi
             TAG="v${VERSION}"
           fi
 
-          # ── Detect channel from version suffix ──────────────────────────
+          # ── Channel detection ────────────────────────────────────────────
           IS_PRERELEASE="false"
           CHANNEL="stable"
-
           if   [[ "${VERSION}" == *"-alpha"*   ]]; then CHANNEL="alpha";   IS_PRERELEASE="true"
           elif [[ "${VERSION}" == *"-beta"*    ]]; then CHANNEL="beta";    IS_PRERELEASE="true"
           elif [[ "${VERSION}" == *"-rc"*      ]]; then CHANNEL="rc";      IS_PRERELEASE="true"
@@ -101,14 +104,18 @@ jobs:
           elif [[ "${VERSION}" == *"-"*        ]]; then CHANNEL="pre";     IS_PRERELEASE="true"
           fi
 
-          # ── Human-readable display name ─────────────────────────────────
+          # ── MSI version must be purely numeric (x.y.z) ──────────────────
+          # Strip everything from the first hyphen onward
+          MSI_VERSION="${VERSION%%-*}"
+
+          # ── Display name ─────────────────────────────────────────────────
           case "${CHANNEL}" in
-            alpha)   DISPLAY_NAME="Gemini Chat v${VERSION} (Alpha)" ;;
-            beta)    DISPLAY_NAME="Gemini Chat v${VERSION} (Beta)" ;;
-            rc)      DISPLAY_NAME="Gemini Chat v${VERSION} (Release Candidate)" ;;
-            preview) DISPLAY_NAME="Gemini Chat v${VERSION} (Preview)" ;;
-            pre)     DISPLAY_NAME="Gemini Chat v${VERSION} (Pre-release)" ;;
-            *)       DISPLAY_NAME="Gemini Chat v${VERSION}" ;;
+            alpha)   DISPLAY="Gemini Chat v${VERSION} (Alpha)" ;;
+            beta)    DISPLAY="Gemini Chat v${VERSION} (Beta)" ;;
+            rc)      DISPLAY="Gemini Chat v${VERSION} (Release Candidate)" ;;
+            preview) DISPLAY="Gemini Chat v${VERSION} (Preview)" ;;
+            pre)     DISPLAY="Gemini Chat v${VERSION} (Pre-release)" ;;
+            *)       DISPLAY="Gemini Chat v${VERSION}" ;;
           esac
 
           echo "version=${VERSION}"           >> "$GITHUB_OUTPUT"
@@ -116,16 +123,10 @@ jobs:
           echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
           echo "channel=${CHANNEL}"           >> "$GITHUB_OUTPUT"
           echo "is_draft=${IS_DRAFT}"         >> "$GITHUB_OUTPUT"
-          echo "display_name=${DISPLAY_NAME}" >> "$GITHUB_OUTPUT"
+          echo "display_name=${DISPLAY}"      >> "$GITHUB_OUTPUT"
+          echo "msi_version=${MSI_VERSION}"   >> "$GITHUB_OUTPUT"
 
-          echo "────────────────────────────────────────"
-          echo "  version:       ${VERSION}"
-          echo "  tag:           ${TAG}"
-          echo "  channel:       ${CHANNEL}"
-          echo "  is_prerelease: ${IS_PRERELEASE}"
-          echo "  is_draft:      ${IS_DRAFT}"
-          echo "  display_name:  ${DISPLAY_NAME}"
-          echo "────────────────────────────────────────"
+          echo "version=${VERSION}  tag=${TAG}  channel=${CHANNEL}  msi_version=${MSI_VERSION}"
 
   # ───────────────────────────────────────────────────────────────────────────
   # JOB 2 — Build self-contained EXE (x64 + arm64)
@@ -138,9 +139,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - rid:        win-x64
+          - rid: win-x64
             arch_label: x64
-          - rid:        win-arm64
+          - rid: win-arm64
             arch_label: arm64
 
     steps:
@@ -158,8 +159,7 @@ jobs:
       - name: Publish single-file EXE
         shell: pwsh
         run: |
-          # Strip pre-release suffix for AssemblyVersion (must be x.y.z.w)
-          $ver = "${{ needs.version.outputs.version }}" -replace '-.*',''
+          $msiVer = "${{ needs.version.outputs.msi_version }}"
           dotnet publish ${{ env.PROJECT_PATH }} `
             --configuration Release `
             --runtime ${{ matrix.rid }} `
@@ -168,12 +168,12 @@ jobs:
             -p:EnableCompressionInSingleFile=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:Version="${{ needs.version.outputs.version }}" `
-            -p:AssemblyVersion="${ver}" `
-            -p:FileVersion="${ver}" `
+            -p:AssemblyVersion="$msiVer" `
+            -p:FileVersion="$msiVer" `
             -p:InformationalVersion="${{ needs.version.outputs.version }}" `
             --output "publish/${{ matrix.rid }}"
 
-      - name: Rename EXE
+      - name: Rename EXE with arch + channel suffix
         shell: pwsh
         run: |
           $channel = "${{ needs.version.outputs.channel }}"
@@ -181,7 +181,7 @@ jobs:
           $src = "publish/${{ matrix.rid }}/${{ env.APP_NAME }}.exe"
           $dst = "publish/${{ matrix.rid }}/${{ env.APP_NAME }}-${{ matrix.arch_label }}${suffix}.exe"
           Move-Item $src $dst -Force
-          Write-Host "→ $dst"
+          Write-Host "Artifact: $dst"
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
@@ -191,7 +191,7 @@ jobs:
           retention-days: 3
 
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 3 — Build MSI installer (x64 + arm64) using WiX Toolset v5
+  # JOB 3 — Build MSI installer (x64 + arm64) using pinned WiX v5.0.2
   # ───────────────────────────────────────────────────────────────────────────
   build-msi:
     name: Build MSI · ${{ matrix.arch_label }}
@@ -217,118 +217,143 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Install WiX v5 + UI extension
-        run: |
-          dotnet tool install --global wix
-          wix extension add --global WixToolset.UI.wixext
+      # ── Install WiX CLI pinned to v5.0.2 ──────────────────────────────────
+      - name: Install WiX CLI v${{ env.WIX_VERSION }}
+        run: dotnet tool install --global wix --version ${{ env.WIX_VERSION }}
 
-      - name: Restore
-        run: dotnet restore ${{ env.PROJECT_PATH }}
-
-      - name: Publish for MSI (non-single-file so WiX can enumerate files)
+      # ── Download WixToolset.UI.wixext 5.0.1 via NuGet directly ───────────
+      # We do NOT use `wix extension add` because it ignores version pins
+      # and can pull incompatible prerelease versions.
+      # Instead we download the .nupkg from NuGet and reference the DLL directly.
+      - name: Download WixToolset.UI.wixext v${{ env.WIX_UI_EXT_VERSION }}
         shell: pwsh
         run: |
-          $ver = "${{ needs.version.outputs.version }}" -replace '-.*',''
+          $pkg  = "WixToolset.UI.wixext"
+          $ver  = "${{ env.WIX_UI_EXT_VERSION }}"
+          $dest = "wixext"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
+          # Download the .nupkg (it is just a zip)
+          $url  = "https://www.nuget.org/api/v2/package/$pkg/$ver"
+          $nupkg = "$dest/$pkg.$ver.nupkg"
+          Invoke-WebRequest -Uri $url -OutFile $nupkg
+          Write-Host "Downloaded $nupkg"
+
+          # Extract and locate the wixext5 DLL
+          Expand-Archive -Path $nupkg -DestinationPath "$dest/extracted" -Force
+          $dll = Get-ChildItem -Path "$dest/extracted" -Filter "*.dll" -Recurse |
+                   Where-Object { $_.FullName -match "wixext5" } |
+                   Select-Object -First 1
+          if (-not $dll) {
+            # Fallback: find any DLL with the extension name
+            $dll = Get-ChildItem -Path "$dest/extracted" -Filter "WixToolset.UI.wixext.dll" -Recurse |
+                     Select-Object -First 1
+          }
+          if (-not $dll) { throw "Could not find WixToolset.UI.wixext.dll in package" }
+
+          Write-Host "UI extension DLL: $($dll.FullName)"
+          # Save path for later steps
+          "$($dll.FullName)" | Out-File -FilePath "wixext/ui_ext_dll.txt" -Encoding utf8
+
+      - name: Restore app
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Publish app for MSI packaging
+        shell: pwsh
+        run: |
+          $msiVer = "${{ needs.version.outputs.msi_version }}"
           dotnet publish ${{ env.PROJECT_PATH }} `
             --configuration Release `
             --runtime ${{ matrix.rid }} `
             --self-contained true `
             -p:PublishSingleFile=false `
             -p:Version="${{ needs.version.outputs.version }}" `
-            -p:AssemblyVersion="${ver}" `
-            -p:FileVersion="${ver}" `
+            -p:AssemblyVersion="$msiVer" `
+            -p:FileVersion="$msiVer" `
             -p:InformationalVersion="${{ needs.version.outputs.version }}" `
             --output "msi-src/${{ matrix.rid }}"
 
-      - name: Generate WiX product descriptor
+      - name: Generate Product.wxs
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path wix | Out-Null
 
-          # WiX requires numeric-only version (strip pre-release suffix)
-          $msiVersion = "${{ needs.version.outputs.version }}" -replace '-.*',''
+          $msiVersion = "${{ needs.version.outputs.msi_version }}"
           $channel    = "${{ needs.version.outputs.channel }}"
           $rid        = "${{ matrix.rid }}"
-          $arch       = "${{ matrix.wix_arch }}"
           $appName    = "${{ env.APP_NAME }}"
 
-          # Use a different install folder name per channel so alpha/beta
-          # can coexist alongside a stable install
-          $folderSuffix = if ($channel -ne "stable") { " ($channel)" } else { "" }
-          $installFolder = "${appName}${folderSuffix}"
-
-          # Stable and pre-release get different UpgradeCodes so they
-          # don't overwrite each other during major version transitions
-          $upgradeCode = if ($channel -eq "stable") {
+          # Stable and pre-release installs use different names + upgrade codes
+          # so they can coexist side-by-side on the same machine
+          $nameSuffix   = if ($channel -ne "stable") { " ($channel)" } else { "" }
+          $displayName  = "${appName}${nameSuffix}"
+          $upgradeCode  = if ($channel -eq "stable") {
             "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
           } else {
             "B2C3D4E5-F6A7-8901-BCDE-F01234567891"
           }
 
+          # WiX v5 schema uses http://wixtoolset.org/schemas/v4/wxs (same namespace as v4)
           $wxs = @"
           <?xml version="1.0" encoding="UTF-8"?>
           <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
                xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
-            <Package Name="${appName}${folderSuffix}"
+            <Package Name="${displayName}"
                      Manufacturer="GeminiChat"
                      Version="${msiVersion}"
                      UpgradeCode="${upgradeCode}"
                      Scope="perUser">
 
               <MajorUpgrade
-                DowngradeErrorMessage="A newer version of [ProductName] is already installed.
-          Please uninstall it first." />
-
+                DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first." />
               <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
-
               <ui:WixUI Id="WixUI_InstallDir" />
               <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
 
-              <Feature Id="ProductFeature" Title="${appName}" Level="1">
+              <Feature Id="MainFeature" Title="${appName}" Level="1">
                 <ComponentGroupRef Id="AppFiles" />
-                <ComponentGroupRef Id="Shortcuts" />
+                <ComponentGroupRef Id="AppShortcuts" />
               </Feature>
 
-              <!-- Install to %LocalAppData%\GeminiChat (no admin needed) -->
               <StandardDirectory Id="LocalAppDataFolder">
-                <Directory Id="INSTALLFOLDER" Name="${installFolder}" />
+                <Directory Id="INSTALLFOLDER" Name="${displayName}" />
               </StandardDirectory>
-
               <StandardDirectory Id="DesktopFolder" />
               <StandardDirectory Id="ProgramMenuFolder">
-                <Directory Id="ProgramMenuSubfolder" Name="${installFolder}" />
+                <Directory Id="AppMenuFolder" Name="${displayName}" />
               </StandardDirectory>
 
-              <!-- Harvest all published files -->
+              <!-- Harvest all published output files automatically -->
               <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
                 <Files Include="msi-src\${rid}\**" />
               </ComponentGroup>
 
-              <!-- Shortcuts as a separate component group -->
-              <ComponentGroup Id="Shortcuts" Directory="INSTALLFOLDER">
-                <Component Id="ShortcutComp" Guid="C3D4E5F6-A7B8-9012-CDEF-012345678902">
+              <!-- Shortcuts + registry key that anchors the component -->
+              <ComponentGroup Id="AppShortcuts" Directory="INSTALLFOLDER">
+                <Component Id="ShortcutComponent"
+                           Guid="C3D4E5F6-A7B8-9012-CDEF-012345678902">
+                  <RegistryValue Root="HKCU"
+                                 Key="Software\GeminiChat\${channel}"
+                                 Name="Installed"
+                                 Type="integer"
+                                 Value="1"
+                                 KeyPath="yes" />
                   <Shortcut Id="DesktopShortcut"
                             Directory="DesktopFolder"
-                            Name="${installFolder}"
+                            Name="${displayName}"
                             Target="[INSTALLFOLDER]${appName}.exe"
                             WorkingDirectory="INSTALLFOLDER"
                             Advertise="no" />
-                  <Shortcut Id="StartShortcut"
-                            Directory="ProgramMenuSubfolder"
+                  <Shortcut Id="StartMenuShortcut"
+                            Directory="AppMenuFolder"
                             Name="${appName}"
                             Target="[INSTALLFOLDER]${appName}.exe"
                             WorkingDirectory="INSTALLFOLDER"
                             Advertise="no" />
-                  <RemoveFolder Id="CleanupMenu"
-                                Directory="ProgramMenuSubfolder"
+                  <RemoveFolder Id="RemoveAppMenuFolder"
+                                Directory="AppMenuFolder"
                                 On="uninstall" />
-                  <RegistryValue Root="HKCU"
-                                 Key="Software\GeminiChat"
-                                 Name="installed"
-                                 Type="integer"
-                                 Value="1"
-                                 KeyPath="yes" />
                 </Component>
               </ComponentGroup>
 
@@ -337,24 +362,27 @@ jobs:
           "@
 
           Set-Content -Path "wix/Product.wxs" -Value $wxs -Encoding UTF8
-          Write-Host "Generated wix/Product.wxs (channel=$channel, arch=$arch)"
+          Write-Host "Generated Product.wxs  channel=$channel  arch=${{ matrix.wix_arch }}"
 
       - name: Build MSI
         shell: pwsh
         run: |
           $channel   = "${{ needs.version.outputs.channel }}"
           $suffix    = if ($channel -ne "stable") { "-$channel" } else { "" }
-          $archLabel = "${{ matrix.arch_label }}"
-          $appName   = "${{ env.APP_NAME }}"
-          $outName   = "${appName}-${archLabel}${suffix}.msi"
+          $outName   = "${{ env.APP_NAME }}-${{ matrix.arch_label }}${suffix}.msi"
+          $uiExtDll  = Get-Content "wixext/ui_ext_dll.txt" -Raw | ForEach-Object { $_.Trim() }
 
           New-Item -ItemType Directory -Force -Path dist | Out-Null
 
+          Write-Host "Building MSI:  $outName"
+          Write-Host "UI ext DLL:    $uiExtDll"
+
           wix build wix/Product.wxs `
             -arch ${{ matrix.wix_arch }} `
+            -ext "$uiExtDll" `
             -o "dist/$outName"
 
-          Write-Host "→ dist/$outName"
+          Write-Host "Built: dist/$outName  ($('{0:N0}' -f (Get-Item "dist/$outName").Length) bytes)"
 
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
@@ -364,7 +392,7 @@ jobs:
           retention-days: 3
 
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 4 — Create GitHub Release and attach all assets
+  # JOB 4 — Create GitHub Release with all assets attached
   # ───────────────────────────────────────────────────────────────────────────
   release:
     name: Publish GitHub Release
@@ -385,45 +413,25 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f | sort
 
-      - name: Build release notes
+      - name: Generate release notes
         shell: bash
         run: |
-          VERSION="${{ needs.version.outputs.version }}"
           CHANNEL="${{ needs.version.outputs.channel }}"
-          IS_PRE="${{ needs.version.outputs.is_prerelease }}"
-          DISPLAY="${{ needs.version.outputs.display_name }}"
+          VERSION="${{ needs.version.outputs.version }}"
 
-          # ── Channel banner ──────────────────────────────────────────────
           case "${CHANNEL}" in
-            alpha)
-              BANNER="⚠️ **Alpha Release** — Early preview. May be unstable or incomplete. Not recommended for production use."
-              ;;
-            beta)
-              BANNER="🔶 **Beta Release** — Feature-complete but may contain bugs. Feedback welcome."
-              ;;
-            rc)
-              BANNER="🔷 **Release Candidate** — Final pre-release build. Please test and report issues before the stable release."
-              ;;
-            preview)
-              BANNER="🔵 **Preview Release** — Showcases upcoming features. May change before stable."
-              ;;
-            stable)
-              BANNER="✅ **Stable Release** — Recommended for all users."
-              ;;
-            *)
-              BANNER="⚠️ **Pre-release** — Use with caution."
-              ;;
+            alpha)   BANNER="⚠️ **Alpha** — Early preview. May be unstable. Not for production." ;;
+            beta)    BANNER="🔶 **Beta** — Feature-complete but may contain bugs. Feedback welcome." ;;
+            rc)      BANNER="🔷 **Release Candidate** — Please test and report issues before stable." ;;
+            preview) BANNER="🔵 **Preview** — Showcases upcoming features. May change before stable." ;;
+            *)       BANNER="✅ **Stable Release** — Recommended for all users." ;;
           esac
 
-          # ── File names depend on channel suffix ─────────────────────────
-          if [[ "${CHANNEL}" == "stable" ]]; then
-            SUFFIX=""
-          else
-            SUFFIX="-${CHANNEL}"
-          fi
+          SUFFIX=""
+          [[ "${CHANNEL}" != "stable" ]] && SUFFIX="-${CHANNEL}"
 
           cat > release_notes.md << EOMD
-          ## ${DISPLAY}
+          ## ${{ needs.version.outputs.display_name }}
 
           ${BANNER}
 
@@ -431,65 +439,51 @@ jobs:
 
           ### 📦 Downloads
 
-          | File | Architecture | Format | Notes |
-          |------|-------------|--------|-------|
-          | \`GeminiChat-x64${SUFFIX}.exe\` | Windows 11 x86-64 | Portable EXE | No install needed |
-          | \`GeminiChat-arm64${SUFFIX}.exe\` | Windows 11 ARM64 | Portable EXE | No install needed |
-          | \`GeminiChat-x64${SUFFIX}.msi\` | Windows 11 x86-64 | MSI Installer | Desktop + Start Menu shortcuts |
-          | \`GeminiChat-arm64${SUFFIX}.msi\` | Windows 11 ARM64 | MSI Installer | Desktop + Start Menu shortcuts |
+          | File | Architecture | Type |
+          |------|-------------|------|
+          | \`GeminiChat-x64${SUFFIX}.exe\` | Windows 11 x86-64 | Portable — run directly, no install |
+          | \`GeminiChat-arm64${SUFFIX}.exe\` | Windows 11 ARM64 | Portable — run directly, no install |
+          | \`GeminiChat-x64${SUFFIX}.msi\` | Windows 11 x86-64 | Installer — Desktop + Start Menu shortcuts |
+          | \`GeminiChat-arm64${SUFFIX}.msi\` | Windows 11 ARM64 | Installer — Desktop + Start Menu shortcuts |
 
-          > **Which file?** Most Windows PCs use x64. ARM64 is for Surface Pro X, Snapdragon X Elite, and other Copilot+ PCs.
+          > **Which file?** Most Windows PCs use **x64**. ARM64 is for Snapdragon X / Copilot+ PCs, Surface Pro X, etc.
           > The MSI installs to \`%LocalAppData%\\GeminiChat\` — no administrator rights required.
 
           ---
 
           ### 🤖 Supported Models
 
-          | Model | API ID | Channel |
-          |-------|--------|---------|
-          | Gemini 2.5 Flash | \`gemini-2.5-flash\` | ⚡ Fast |
-          | Gemini 2.5 Pro | \`gemini-2.5-pro\` | 🧠 Powerful |
-          | Gemini 2.5 Flash Lite | \`gemini-2.5-flash-lite\` | ⚡⚡ Ultra-fast |
-          | Gemini 3 Flash | \`gemini-3-flash-preview\` | 🚀 Frontier |
-          | Gemini 3.1 Pro | \`gemini-3.1-pro-preview\` | 🌟 State-of-the-art |
-          | Gemini 3.1 Flash Lite | \`gemini-3.1-flash-lite-preview\` | ⚡⚡ Lite |
+          | Model | API ID |
+          |-------|--------|
+          | Gemini 2.5 Flash | \`gemini-2.5-flash\` |
+          | Gemini 2.5 Pro | \`gemini-2.5-pro\` |
+          | Gemini 2.5 Flash Lite | \`gemini-2.5-flash-lite\` |
+          | Gemini 3 Flash | \`gemini-3-flash-preview\` |
+          | Gemini 3.1 Pro | \`gemini-3.1-pro-preview\` |
+          | Gemini 3.1 Flash Lite | \`gemini-3.1-flash-lite-preview\` |
 
           ---
 
           ### 🚀 Getting Started
 
-          1. Download the \`.msi\` for your architecture and run it, or use the portable \`.exe\` directly
-          2. Get a free Gemini API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
-          3. Launch **Gemini Chat**, paste your key and click **Validate & Save**
+          1. Download the \`.msi\` for your architecture and run it (or use the portable \`.exe\`)
+          2. Get a free API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+          3. Launch **Gemini Chat**, paste your key, click **Validate & Save**
 
           ---
 
-          ### ✨ Features
-
-          - Streaming responses in real time
-          - Persistent chat history across sessions
-          - Per-session model switching
-          - Adjustable temperature, max tokens, system prompt
-          - Stop generation mid-stream
-          - API key validated on entry — zero wasted requests
-          - Dark, modern UI
-
-          ---
-
-          **Full changelog:** [\`${VERSION}\`](../../commits/${{ needs.version.outputs.tag }})
+          **Full changelog:** compare [\`${VERSION}\`](../../commits/${{ needs.version.outputs.tag }})
           EOMD
-
-          echo "Release notes written."
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name:      ${{ needs.version.outputs.tag }}
-          name:          ${{ needs.version.outputs.display_name }}
-          body_path:     release_notes.md
-          draft:         ${{ needs.version.outputs.is_draft }}
-          prerelease:    ${{ needs.version.outputs.is_prerelease }}
-          make_latest:   ${{ needs.version.outputs.is_prerelease == 'false' }}
+          tag_name:    ${{ needs.version.outputs.tag }}
+          name:        ${{ needs.version.outputs.display_name }}
+          body_path:   release_notes.md
+          draft:       ${{ needs.version.outputs.is_draft }}
+          prerelease:  ${{ needs.version.outputs.is_prerelease }}
+          make_latest: ${{ needs.version.outputs.is_prerelease == 'false' }}
           files: |
             artifacts/exe-win-x64/*.exe
             artifacts/exe-win-arm64/*.exe
