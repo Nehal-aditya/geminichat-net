@@ -47,12 +47,31 @@ jobs:
           else
             TAG="${GITHUB_REF_NAME:-}"
           fi
+
           VERSION="${TAG#v}"
           if [ -z "$VERSION" ]; then
             VERSION="0.0.0"
           fi
+
+          # --- WiX version sanitization ---
+          # Strip everything except digits and dots
+          WIX_VERSION=$(echo "$VERSION" | sed 's/[^0-9\.]//g')
+
+          # Count parts
+          PARTS=$(echo "$WIX_VERSION" | awk -F. '{print NF}')
+          # Pad to 4 parts
+          while [ "$PARTS" -lt 4 ]; do
+            WIX_VERSION="${WIX_VERSION}.0"
+            PARTS=$((PARTS+1))
+          done
+          # Truncate if more than 4 parts
+          if [ "$PARTS" -gt 4 ]; then
+            WIX_VERSION=$(echo "$WIX_VERSION" | cut -d. -f1-4)
+          fi
+
           echo "TAG=$TAG" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "WIX_VERSION=$WIX_VERSION" >> $GITHUB_ENV
 
       - name: Restore
         run: dotnet restore "${{ env.PROJECT_PATH }}"
@@ -150,7 +169,7 @@ jobs:
           $wxs = @"
           <?xml version="1.0" encoding="UTF-8"?>
           <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-            <Product Id="*" Name="$appName" Language="1033" Version="$version" Manufacturer="$manufacturer" UpgradeCode="$upgradeCode">
+            <Product Id="*" Name="$appName" Language="1033" Version="$(var.WIX_VERSION)" Manufacturer="$manufacturer" UpgradeCode="$upgradeCode">
               <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
               <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
               <MediaTemplate />
