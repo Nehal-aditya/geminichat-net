@@ -64,11 +64,9 @@ jobs:
       - name: Publish self-contained single-file
         shell: bash
         run: |
-          RID=${{ matrix.runtime }}
-          PUBLISH_DIR=publish/${RID}
-          dotnet publish "${{ env.PROJECT_PATH }}" -c Release -r $RID --self-contained true "/p:PublishSingleFile=true" "/p:PublishTrimmed=false" -o $PUBLISH_DIR
-          mkdir -p "${{ env.OUTPUT_DIR }}/${RID}"
-          cp "$PUBLISH_DIR/${{ env.APP_NAME }}.exe" "${{ env.OUTPUT_DIR }}/${RID}/"
+          dotnet publish "${{ env.PROJECT_PATH }}" -c Release -r ${{ matrix.runtime }} --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false -o publish/${{ matrix.runtime }}
+          mkdir -p "${{ env.OUTPUT_DIR }}/${{ matrix.runtime }}"
+          cp "publish/${{ matrix.runtime }}/${{ env.APP_NAME }}.exe" "${{ env.OUTPUT_DIR }}/${{ matrix.runtime }}/"
 
       - name: Install WiX Toolset
         shell: powershell
