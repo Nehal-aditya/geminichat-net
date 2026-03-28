@@ -62,7 +62,7 @@ jobs:
         shell: bash
 
       - name: Publish self-contained single-file
-        shell: bash
+        shell: powershell
         run: |
           dotnet publish "${{ env.PROJECT_PATH }}" -c Release -r ${{ matrix.runtime }} --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false -o publish/${{ matrix.runtime }}
           mkdir -p "${{ env.OUTPUT_DIR }}/${{ matrix.runtime }}"
