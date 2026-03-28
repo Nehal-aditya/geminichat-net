@@ -62,7 +62,7 @@ jobs:
         run: |
           RID=${{ matrix.runtime }}
           PUBLISH_DIR=publish/${RID}
-          dotnet publish "${{ env.PROJECT_PATH }}" -c Release -r $RID --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false -o $PUBLISH_DIR
+          dotnet publish "${{ env.PROJECT_PATH }}" -c Release -r $RID --self-contained true "/p:PublishSingleFile=true" "/p:PublishTrimmed=false" -o $PUBLISH_DIR
           mkdir -p "${{ env.OUTPUT_DIR }}/${RID}"
           cp "$PUBLISH_DIR/${{ env.APP_NAME }}.exe" "${{ env.OUTPUT_DIR }}/${RID}/"
 
