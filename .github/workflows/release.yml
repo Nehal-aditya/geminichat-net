@@ -1,0 +1,254 @@
+name: Release Windows builds (with persistent UpgradeCode)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Mark release as prerelease'
+        required: false
+        default: 'false'
+
+env:
+  APP_NAME: "Gemini Chat"              # <<-- change this
+  PROJECT_PATH: "src/geminichat-net/GeminiChat.csproj" # <<-- change this
+  MANUFACTURER: "Nehaladitya"            # <<-- change this
+  OUTPUT_DIR: "artifacts"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        runtime:
+          - win-x64
+          - win-arm64
+
+    steps:
+      - name: Checkout (allow push)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Determine tag and version
+        id: version
+        shell: bash
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="${GITHUB_REF_NAME:-}"
+          fi
+          VERSION="${TAG#v}"
+          if [ -z "$VERSION" ]; then
+            VERSION="0.0.0"
+          fi
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Restore
+        run: dotnet restore "${{ env.PROJECT_PATH }}"
+
+      - name: Publish self-contained single-file
+        shell: bash
+        run: |
+          RID=${{ matrix.runtime }}
+          PUBLISH_DIR=publish/${RID}
+          dotnet publish "${{ env.PROJECT_PATH }}" -c Release -r $RID --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false -o $PUBLISH_DIR
+          mkdir -p "${{ env.OUTPUT_DIR }}/${RID}"
+          cp "$PUBLISH_DIR/${{ env.APP_NAME }}.exe" "${{ env.OUTPUT_DIR }}/${RID}/"
+
+      - name: Install WiX Toolset
+        shell: powershell
+        run: choco install wixtoolset -y
+
+      - name: Ensure persistent UpgradeCode (generate if missing and persist)
+        id: ensure-upgrade
+        shell: powershell
+        run: |
+          $upgradeFile = ".github/upgrade_code.txt"
+          $envUpgrade = ""
+          if ($env:UPGRADE_CODE) { $envUpgrade = $env:UPGRADE_CODE.Trim() }
+          if ($envUpgrade -and $envUpgrade -ne "") {
+            Write-Host "Using UPGRADE_CODE from workflow env."
+            $code = $envUpgrade
+          } elseif (Test-Path $upgradeFile) {
+            Write-Host "Reading UpgradeCode from $upgradeFile"
+            $code = (Get-Content $upgradeFile -Raw).Trim()
+            if (-not $code) { $code = $null }
+          } else {
+            $code = $null
+          }
+          if (-not $code) {
+            Write-Host "No UpgradeCode found; generating a new GUID."
+            $code = [guid]::NewGuid().ToString("B").ToUpper()
+            New-Item -ItemType Directory -Path ".github" -Force | Out-Null
+            Set-Content -Path $upgradeFile -Value $code -Encoding UTF8
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add $upgradeFile
+            git commit -m "chore: persist WiX UpgradeCode for installer" || Write-Host "No changes to commit."
+            git push origin HEAD:${GITHUB_REF##*/} || Write-Host "Push failed; ensure workflow has push permission."
+            Write-Host "Persisted UpgradeCode to $upgradeFile."
+          } else {
+            Write-Host "Using UpgradeCode: $code"
+          }
+          echo "UPGRADE_CODE=$code" >> $env:GITHUB_ENV
+
+      - name: Generate component GUIDs
+        id: guids
+        shell: powershell
+        run: |
+          $compMain = [guid]::NewGuid().ToString("B").ToUpper()
+          $compStart = [guid]::NewGuid().ToString("B").ToUpper()
+          $compDesktop = [guid]::NewGuid().ToString("B").ToUpper()
+          echo "COMP_GUID_MAIN=$compMain" >> $env:GITHUB_ENV
+          echo "COMP_GUID_START=$compStart" >> $env:GITHUB_ENV
+          echo "COMP_GUID_DESKTOP=$compDesktop" >> $env:GITHUB_ENV
+          Write-Host "Generated component GUIDs."
+
+      - name: Prepare WiX files and assets
+        shell: powershell
+        run: |
+          $RID = "${{ matrix.runtime }}"
+          $MSI_DIR = "${{ env.OUTPUT_DIR }}\$RID"
+          New-Item -ItemType Directory -Path $MSI_DIR -Force | Out-Null
+
+          # Handle icon
+          $iconSource = "Assets/app.ico"
+          $iconDest = "$MSI_DIR\app.ico"
+          if (Test-Path $iconSource) {
+            Copy-Item $iconSource -Destination $iconDest -Force
+            $iconPath = (Resolve-Path $iconDest).Path
+          } else {
+            Write-Host "Warning: $iconSource not found. ARP icon will be missing."
+            $iconPath = $null
+          }
+
+          $exePath = (Resolve-Path "publish\$RID\${{ env.APP_NAME }}.exe").Path
+          $version = "${{ env.VERSION }}"
+          $appName = "${{ env.APP_NAME }}"
+          $manufacturer = "${{ env.MANUFACTURER }}"
+          $exeFileName = "${{ env.APP_NAME }}.exe"
+          $upgradeCode = "${{ env.UPGRADE_CODE }}"
+
+          # Build conditional XML elements
+          $iconLine = if ($iconPath) { "<File Id=""filIcon"" Source=""$iconPath"" />" } else { "" }
+          $iconProperty = if ($iconPath) { "<Icon Id=""AppIcon.ico"" SourceFile=""$iconPath"" />" } else { "" }
+
+          # WiX XML - Start from column 0 to avoid embedding spaces
+          $wxs = @"
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="$appName" Language="1033" Version="$version" Manufacturer="$manufacturer" UpgradeCode="$upgradeCode">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="$appName" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="$appName" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
+    </Directory>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="cmpMainExe" Guid="$($env:COMP_GUID_MAIN)">
+        <File Id="filExe" Source="$exePath" KeyPath="yes" Checksum="yes" />
+        $iconLine
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="cmpStartMenuShortcut" Guid="$($env:COMP_GUID_START)">
+        <Shortcut Id="StartMenuShortcut" Name="$appName" Description="Launch $appName" Target="[INSTALLFOLDER]$exeFileName" WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\$manufacturer\$appName" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="cmpDesktopShortcut" Guid="$($env:COMP_GUID_DESKTOP)">
+        <Shortcut Id="DesktopShortcut" Name="$appName" Description="Launch $appName" Target="[INSTALLFOLDER]$exeFileName" WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveDesktopFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\$manufacturer\$appName" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    $iconProperty
+    <Feature Id="ProductFeature" Title="$appName" Level="1">
+      <ComponentRef Id="cmpMainExe" />
+      <ComponentRef Id="cmpStartMenuShortcut" />
+      <ComponentRef Id="cmpDesktopShortcut" />
+    </Feature>
+  </Product>
+</Wix>
+"@
+          $wxsPath = "$MSI_DIR\Product.wxs"
+          $wxs | Out-File -FilePath $wxsPath -Encoding UTF8
+          Write-Host "WiX file created successfully at $wxsPath with UpgradeCode: $upgradeCode"
+
+      - name: Build MSI with WiX
+        shell: powershell
+        run: |
+          $RID = "${{ matrix.runtime }}"
+          $MSI_DIR = "${{ env.OUTPUT_DIR }}\$RID"
+          Push-Location $MSI_DIR
+          candle.exe Product.wxs -o Product.wixobj
+          light.exe Product.wixobj -o "${{ env.APP_NAME }}-$RID-${{ env.VERSION }}.msi"
+          Pop-Location
+          Write-Host "MSI created: ${{ env.APP_NAME }}-$RID-${{ env.VERSION }}.msi"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-${{ matrix.runtime }}
+          path: ${{ env.OUTPUT_DIR }}/${{ matrix.runtime }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Determine tag and prerelease flag
+        id: meta
+        shell: bash
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="${GITHUB_REF_NAME:-}"
+          fi
+          INPUT_PRERELEASE="${{ github.event.inputs.prerelease || 'false' }}"
+          if echo "$TAG" | grep -qi -- '-rc'; then
+            PRERELEASE=true
+          elif [ "$INPUT_PRERELEASE" = "true" ] || [ "$INPUT_PRERELEASE" = "True" ]; then
+            PRERELEASE=true
+          else
+            PRERELEASE=false
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release and upload assets
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.meta.outputs.tag != '' && steps.meta.outputs.tag || format('v{0}', github.run_number) }}
+          name: Release ${{ steps.meta.outputs.tag != '' && steps.meta.outputs.tag || format('v{0}', github.run_number) }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          files: |
+            artifacts/windows-build-win-x64/*.exe
+            artifacts/windows-build-win-x64/*.msi
+            artifacts/windows-build-win-arm64/*.exe
+            artifacts/windows-build-win-arm64/*.msi

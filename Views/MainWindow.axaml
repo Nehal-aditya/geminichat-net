@@ -1,0 +1,598 @@
+<Window xmlns="https://github.com/avaloniaui"
+        Icon="avares://GeminiChat/Assets/app.ico"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:GeminiChat.ViewModels"
+        xmlns:m="clr-namespace:GeminiChat.Models"
+        xmlns:cv="clr-namespace:GeminiChat.Converters"
+        x:Class="GeminiChat.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="Gemini Chat"
+        Width="1300" Height="820"
+        MinWidth="900" MinHeight="600"
+        WindowStartupLocation="CenterScreen"
+        Background="#080D1A">
+
+  <Window.Resources>
+    <cv:BoolToVisConverter         x:Key="BoolVis"/>
+    <cv:InverseBoolConverter       x:Key="InvBool"/>
+    <cv:RoleToAlignConverter       x:Key="RoleAlign"/>
+    <cv:RoleToBubbleBrushConverter x:Key="RoleBubble"/>
+    <cv:RoleToTextBrushConverter   x:Key="RoleText"/>
+    <cv:ApiKeyValidColorConverter  x:Key="KeyColor"/>
+    <cv:DateTimeConverter          x:Key="DateFmt"/>
+    <cv:IsUserToAvatarTextConverter x:Key="AvatarText"/>
+    <cv:IsUserToAvatarBrushConverter x:Key="AvatarBrush"/>
+    <cv:StatusToColorConverter     x:Key="StatusColor"/>
+    <cv:IntToVisConverter          x:Key="IntVis"/>
+  </Window.Resources>
+
+  <Window.Styles>
+    <Style Selector="TextBlock">
+      <Setter Property="Foreground" Value="#E2E8F0"/>
+      <Setter Property="FontFamily" Value="Segoe UI,sans-serif"/>
+    </Style>
+    <Style Selector="TextBox">
+      <Setter Property="Background"   Value="#111827"/>
+      <Setter Property="Foreground"   Value="#E2E8F0"/>
+      <Setter Property="BorderBrush"  Value="#334155"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding"      Value="12,8"/>
+      <Setter Property="FontFamily"   Value="Segoe UI,sans-serif"/>
+      <Setter Property="CaretBrush"   Value="#60A5FA"/>
+    </Style>
+    <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+      <Setter Property="BorderBrush" Value="#3B82F6"/>
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="Background"   Value="#2563EB"/>
+      <Setter Property="Foreground"   Value="White"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding"      Value="16,10"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Cursor"       Value="Hand"/>
+      <Setter Property="FontWeight"   Value="SemiBold"/>
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#1D4ED8"/>
+    </Style>
+    <Style Selector="Button.ghost">
+      <Setter Property="Background"      Value="Transparent"/>
+      <Setter Property="Foreground"      Value="#94A3B8"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding"         Value="8"/>
+      <Setter Property="CornerRadius"    Value="6"/>
+      <Setter Property="Cursor"          Value="Hand"/>
+    </Style>
+    <Style Selector="Button.ghost:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#1E293B"/>
+    </Style>
+    <Style Selector="Button.danger">
+      <Setter Property="Background"      Value="#DC2626"/>
+      <Setter Property="Foreground"      Value="White"/>
+      <Setter Property="CornerRadius"    Value="10"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Cursor"          Value="Hand"/>
+    </Style>
+    <Style Selector="ComboBox">
+      <Setter Property="Background"   Value="#1E293B"/>
+      <Setter Property="Foreground"   Value="#E2E8F0"/>
+      <Setter Property="BorderBrush"  Value="#334155"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding"      Value="12,8"/>
+    </Style>
+    <Style Selector="Slider">
+      <Setter Property="Foreground" Value="#2563EB"/>
+    </Style>
+  </Window.Styles>
+
+  <Grid ColumnDefinitions="Auto,*,Auto">
+
+    <!-- ═══════════════════════════════════════ SIDEBAR ══════════════════════ -->
+    <Border Grid.Column="0"
+            IsVisible="{Binding IsSidebarOpen}"
+            Background="#060B16"
+            BorderBrush="#1E293B" BorderThickness="0,0,1,0"
+            Width="260">
+      <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- Logo + New Chat -->
+        <Border Grid.Row="0" Padding="16,20,16,12">
+          <StackPanel Spacing="12">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Border Background="#1E3A8A" CornerRadius="10" Width="38" Height="38">
+                <TextBlock Text="G" FontSize="19" FontWeight="Bold" Foreground="#60A5FA"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Border>
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Gemini Chat" FontSize="15" FontWeight="Bold" Foreground="#F1F5F9"/>
+                <TextBlock Text="Powered by Google AI" FontSize="10" Foreground="#475569"/>
+              </StackPanel>
+            </StackPanel>
+
+            <Button Command="{Binding NewSessionCommand}"
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Center"
+                    Background="#1E293B" Foreground="#E2E8F0"
+                    CornerRadius="8" Padding="12,10"
+                    BorderBrush="#334155" BorderThickness="1" Cursor="Hand">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="＋" FontSize="15" FontWeight="Bold"/>
+                <TextBlock Text="New Chat" FontSize="13"/>
+              </StackPanel>
+            </Button>
+          </StackPanel>
+        </Border>
+
+        <!-- Label -->
+        <Border Grid.Row="1" Padding="16,4,16,8">
+          <TextBlock Text="RECENT CHATS" FontSize="10" FontWeight="SemiBold"
+                     Foreground="#334155" LetterSpacing="1.5"/>
+        </Border>
+
+        <!-- Session list -->
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+          <ItemsControl ItemsSource="{Binding Sessions}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="m:ChatSession">
+                <Grid ColumnDefinitions="*,Auto" Margin="8,2">
+                  <Button Grid.Column="0"
+                          HorizontalAlignment="Stretch"
+                          HorizontalContentAlignment="Left"
+                          Background="Transparent" BorderThickness="0"
+                          Padding="10,8" Cursor="Hand"
+                          Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectSessionCommand}"
+                          CommandParameter="{Binding}">
+                    <Button.Styles>
+                      <Style Selector="Button:pointerover /template/ ContentPresenter">
+                        <Setter Property="Background" Value="#0F172A"/>
+                      </Style>
+                    </Button.Styles>
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="{Binding Title}" FontSize="12" Foreground="#CBD5E1"
+                                 TextTrimming="CharacterEllipsis"/>
+                      <TextBlock Text="{Binding UpdatedAt, Converter={StaticResource DateFmt}}"
+                                 FontSize="10" Foreground="#334155"/>
+                    </StackPanel>
+                  </Button>
+                  <Button Grid.Column="1" Classes="ghost"
+                          Width="28" Height="28" Padding="4"
+                          Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).DeleteSessionCommand}"
+                          CommandParameter="{Binding}">
+                    <TextBlock Text="×" FontSize="14" HorizontalAlignment="Center"/>
+                  </Button>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+
+        <!-- Settings link -->
+        <Border Grid.Row="3" Padding="12,10"
+                BorderBrush="#1E293B" BorderThickness="0,1,0,0">
+          <Button Classes="ghost" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" Padding="8,6"
+                  Command="{Binding ToggleSettingsCommand}">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <TextBlock Text="⚙" FontSize="15" Foreground="#475569"/>
+              <TextBlock Text="Settings" FontSize="13" Foreground="#64748B"/>
+            </StackPanel>
+          </Button>
+        </Border>
+      </Grid>
+    </Border>
+
+    <!-- ══════════════════════════════════════ CHAT AREA ══════════════════════ -->
+    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*,Auto,Auto">
+
+      <!-- Top bar -->
+      <Border Grid.Row="0" Background="#060B16"
+              BorderBrush="#1E293B" BorderThickness="0,0,0,1" Padding="14,10">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <Button Grid.Column="0" Classes="ghost" Width="36" Height="36"
+                  Command="{Binding ToggleSidebarCommand}">
+            <TextBlock Text="☰" FontSize="16" HorizontalAlignment="Center"/>
+          </Button>
+
+          <!-- Model selector -->
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10"
+                      HorizontalAlignment="Center" VerticalAlignment="Center">
+            <TextBlock Text="Model:" FontSize="12" Foreground="#475569" VerticalAlignment="Center"/>
+            <ComboBox ItemsSource="{Binding AvailableModels}"
+                      SelectedItem="{Binding SelectedModel}"
+                      MinWidth="230">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="m:GeminiModel">
+                  <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2">
+                    <Border Background="#0F2557" CornerRadius="4" Padding="5,2">
+                      <TextBlock Text="{Binding Badge}" FontSize="9" FontWeight="Bold"
+                                 Foreground="#93C5FD"/>
+                    </Border>
+                    <TextBlock Text="{Binding Name}" FontSize="13" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
+
+          <!-- Clear button -->
+          <Button Grid.Column="2" Classes="ghost" Width="36" Height="36"
+                  Command="{Binding ClearCurrentChatCommand}" ToolTip.Tip="Clear chat">
+            <TextBlock Text="🗑" FontSize="14" HorizontalAlignment="Center"/>
+          </Button>
+        </Grid>
+      </Border>
+
+      <!-- API Key Banner (shown when not set) -->
+      <Border Grid.Row="1"
+              IsVisible="{Binding IsApiKeyPanelVisible}"
+              Background="#0B1628"
+              BorderBrush="#1E40AF" BorderThickness="0,0,0,2"
+              Padding="18,14">
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+          <TextBlock Grid.Column="0" Text="🔑" FontSize="20" VerticalAlignment="Center" Margin="0,0,12,0"/>
+          <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+            <TextBlock Text="Enter your Gemini API Key" FontSize="13" FontWeight="SemiBold" Foreground="#93C5FD"/>
+            <TextBlock Text="Get a free key at ai.google.dev/aistudio" FontSize="11" Foreground="#475569"/>
+          </StackPanel>
+          <TextBox Grid.Column="2"
+                   Text="{Binding ApiKey}"
+                   PasswordChar="•"
+                   Watermark="AIzaSy..."
+                   Width="280"
+                   Margin="12,0"/>
+          <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="{Binding ApiKeyStatus}" FontSize="11"
+                       Foreground="{Binding ApiKeyValid, Converter={StaticResource KeyColor}}"
+                       VerticalAlignment="Center"/>
+            <Button Classes="primary" Command="{Binding SaveApiKeyCommand}"
+                    IsEnabled="{Binding IsValidating, Converter={StaticResource InvBool}}">
+              <TextBlock Text="{Binding IsValidating, Converter={StaticResource InvBool}, ConverterParameter=Validate}"/>
+            </Button>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- API status strip (shown when key is set) -->
+      <Border Grid.Row="1"
+              IsVisible="{Binding IsApiKeyPanelVisible, Converter={StaticResource InvBool}}"
+              Background="Transparent" Padding="18,6">
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+          <Ellipse Width="7" Height="7"
+                   Fill="{Binding ApiKeyValid, Converter={StaticResource KeyColor}}"
+                   VerticalAlignment="Center"/>
+          <TextBlock Text="{Binding ApiKeyStatus}" FontSize="11" Foreground="#475569" VerticalAlignment="Center"/>
+          <Button Classes="ghost" Padding="4,2"
+                  Command="{Binding ShowApiKeyPanelCommand}">
+            <TextBlock Text="Change key" FontSize="11" Foreground="#3B82F6"/>
+          </Button>
+        </StackPanel>
+      </Border>
+
+      <!-- ── Messages ── -->
+      <ScrollViewer Grid.Row="2"
+                    VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Disabled"
+                    Padding="0,4">
+        <StackPanel Margin="16,0" Spacing="4">
+
+          <!-- Welcome card (visible when no messages) -->
+          <Border IsVisible="{Binding CurrentSession.Messages.Count, Converter={StaticResource IntVis}}"
+                  HorizontalAlignment="Center"
+                  Background="#0B1628"
+                  CornerRadius="16"
+                  BorderBrush="#1E3A8A" BorderThickness="1"
+                  Padding="32,28"
+                  Margin="0,60,0,0"
+                  MaxWidth="480">
+            <StackPanel Spacing="14" HorizontalAlignment="Center">
+              <Border Background="#172554" CornerRadius="14"
+                      Width="56" Height="56" HorizontalAlignment="Center">
+                <TextBlock Text="✦" FontSize="26" Foreground="#60A5FA"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Border>
+              <TextBlock Text="Welcome to Gemini Chat"
+                         FontSize="20" FontWeight="Bold" Foreground="#F1F5F9"
+                         HorizontalAlignment="Center"/>
+              <TextBlock Text="Select a model above and start chatting."
+                         FontSize="13" Foreground="#64748B"
+                         HorizontalAlignment="Center" TextAlignment="Center"/>
+              <!-- Model chips -->
+              <WrapPanel HorizontalAlignment="Center" ItemWidth="90">
+                <Border Background="#0F2557" CornerRadius="6" Padding="8,4" Margin="3">
+                  <TextBlock Text="2.5 Flash" FontSize="10" Foreground="#60A5FA" HorizontalAlignment="Center"/>
+                </Border>
+                <Border Background="#0F2557" CornerRadius="6" Padding="8,4" Margin="3">
+                  <TextBlock Text="2.5 Pro" FontSize="10" Foreground="#60A5FA" HorizontalAlignment="Center"/>
+                </Border>
+                <Border Background="#0F2557" CornerRadius="6" Padding="8,4" Margin="3">
+                  <TextBlock Text="2.5 Lite" FontSize="10" Foreground="#60A5FA" HorizontalAlignment="Center"/>
+                </Border>
+                <Border Background="#0F2557" CornerRadius="6" Padding="8,4" Margin="3">
+                  <TextBlock Text="3 Flash" FontSize="10" Foreground="#60A5FA" HorizontalAlignment="Center"/>
+                </Border>
+                <Border Background="#0F2557" CornerRadius="6" Padding="8,4" Margin="3">
+                  <TextBlock Text="3.1 Pro" FontSize="10" Foreground="#60A5FA" HorizontalAlignment="Center"/>
+                </Border>
+                <Border Background="#0F2557" CornerRadius="6" Padding="8,4" Margin="3">
+                  <TextBlock Text="3.1 Lite" FontSize="10" Foreground="#60A5FA" HorizontalAlignment="Center"/>
+                </Border>
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Message bubbles -->
+          <ItemsControl ItemsSource="{Binding CurrentSession.Messages}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="m:ChatMessage">
+                <Grid Margin="0,6">
+                  <!-- User message: avatar on right -->
+                  <StackPanel Orientation="Horizontal"
+                              HorizontalAlignment="Right"
+                              IsVisible="{Binding IsUser}"
+                              Spacing="10"
+                              MaxWidth="680">
+                    <Border Background="#2563EB"
+                            CornerRadius="14,14,4,14"
+                            Padding="14,10"
+                            MaxWidth="560">
+                      <StackPanel Spacing="4">
+                        <SelectableTextBlock Text="{Binding Content}"
+                                            Foreground="#FFFFFF"
+                                            FontSize="13.5"
+                                            TextWrapping="Wrap"
+                                            LineHeight="22"/>
+                        <TextBlock Text="{Binding Timestamp, Converter={StaticResource DateFmt}}"
+                                   FontSize="10" Foreground="#93C5FD" HorizontalAlignment="Right"/>
+                      </StackPanel>
+                    </Border>
+                    <Border Background="#1E40AF" CornerRadius="8"
+                            Width="32" Height="32" VerticalAlignment="Top">
+                      <TextBlock Text="U" FontSize="13" FontWeight="Bold"
+                                 Foreground="White"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                  </StackPanel>
+
+                  <!-- Assistant message: avatar on left -->
+                  <StackPanel Orientation="Horizontal"
+                              HorizontalAlignment="Left"
+                              IsVisible="{Binding IsAssistant}"
+                              Spacing="10"
+                              MaxWidth="680">
+                    <Border Background="#1E3A8A" CornerRadius="8"
+                            Width="32" Height="32" VerticalAlignment="Top">
+                      <TextBlock Text="G" FontSize="13" FontWeight="Bold"
+                                 Foreground="#60A5FA"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <Border Background="#1E293B"
+                            CornerRadius="14,14,14,4"
+                            Padding="14,10"
+                            MaxWidth="560">
+                      <StackPanel Spacing="6">
+                        <SelectableTextBlock Text="{Binding Content}"
+                                            Foreground="#E2E8F0"
+                                            FontSize="13.5"
+                                            TextWrapping="Wrap"
+                                            LineHeight="22"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="{Binding Timestamp, Converter={StaticResource DateFmt}}"
+                                     FontSize="10" Foreground="#475569"/>
+                          <TextBlock IsVisible="{Binding IsStreaming}"
+                                     Text="● generating…"
+                                     FontSize="10" Foreground="#10B981"/>
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- Status bar -->
+      <Border Grid.Row="3" Padding="18,4">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Grid.Column="0" Text="{Binding StatusMessage}"
+                     FontSize="11" Foreground="#334155" VerticalAlignment="Center"/>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+            <TextBlock Text="{Binding SelectedModel.Badge}"
+                       FontSize="11" Foreground="#2563EB"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- Input area -->
+      <Border Grid.Row="4" Background="#060B16"
+              BorderBrush="#1E293B" BorderThickness="0,1,0,0"
+              Padding="16,14">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBox Grid.Column="0"
+                   Name="InputBox"
+                   Text="{Binding UserInput}"
+                   Watermark="Message Gemini…"
+                   AcceptsReturn="True"
+                   MinHeight="46"
+                   MaxHeight="160"
+                   Padding="14,12"
+                   CornerRadius="12"
+                   FontSize="13.5"
+                   TextWrapping="Wrap"
+                   VerticalContentAlignment="Center"/>
+
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="10,0,0,0"
+                      VerticalAlignment="Bottom">
+            <!-- Stop button -->
+            <Button Classes="danger"
+                    IsVisible="{Binding IsLoading}"
+                    Command="{Binding StopGenerationCommand}"
+                    Width="46" Height="46" Padding="0">
+              <TextBlock Text="■" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Button>
+            <!-- Send button -->
+            <Button Classes="primary"
+                    IsVisible="{Binding IsLoading, Converter={StaticResource InvBool}}"
+                    Command="{Binding SendMessageCommand}"
+                    Width="46" Height="46" Padding="0"
+                    CornerRadius="12">
+              <TextBlock Text="➤" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Button>
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <!-- ══════════════════════════════════════ SETTINGS PANEL ═════════════════ -->
+    <Border Grid.Column="2"
+            IsVisible="{Binding IsSettingsOpen}"
+            Background="#060B16"
+            BorderBrush="#1E293B" BorderThickness="1,0,0,0"
+            Width="340">
+      <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+
+          <!-- Header -->
+          <Border Padding="20,18,20,14"
+                  BorderBrush="#1E293B" BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Grid.Column="0">
+                <TextBlock Text="Settings" FontSize="17" FontWeight="Bold" Foreground="#F1F5F9"/>
+                <TextBlock Text="Configure models &amp; generation" FontSize="11" Foreground="#475569"/>
+              </StackPanel>
+              <Button Grid.Column="1" Classes="ghost" Width="32" Height="32"
+                      Command="{Binding ToggleSettingsCommand}">
+                <TextBlock Text="×" FontSize="18" HorizontalAlignment="Center"/>
+              </Button>
+            </Grid>
+          </Border>
+
+          <!-- API Key section -->
+          <Border Padding="20,14"
+                  BorderBrush="#1E293B" BorderThickness="0,0,0,1">
+            <StackPanel Spacing="10">
+              <TextBlock Text="🔑  API Key" FontSize="12" FontWeight="SemiBold" Foreground="#64748B"/>
+              <TextBox Text="{Binding ApiKey}" PasswordChar="•" Watermark="AIzaSy…"/>
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                  <Ellipse Width="7" Height="7"
+                           Fill="{Binding ApiKeyValid, Converter={StaticResource KeyColor}}"
+                           VerticalAlignment="Center"/>
+                  <TextBlock Text="{Binding ApiKeyStatus}" FontSize="11" Foreground="#475569"/>
+                </StackPanel>
+                <Button Grid.Column="1" Classes="primary" Command="{Binding SaveApiKeyCommand}"
+                        Padding="12,7" FontSize="12">
+                  <TextBlock Text="Validate"/>
+                </Button>
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <!-- Model section -->
+          <Border Padding="20,14"
+                  BorderBrush="#1E293B" BorderThickness="0,0,0,1">
+            <StackPanel Spacing="10">
+              <TextBlock Text="🤖  Default Model" FontSize="12" FontWeight="SemiBold" Foreground="#64748B"/>
+              <ComboBox ItemsSource="{Binding AvailableModels}"
+                        SelectedItem="{Binding SelectedModel}"
+                        HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="m:GeminiModel">
+                    <StackPanel Spacing="1" Margin="0,3">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Border Background="#0F2557" CornerRadius="4" Padding="5,2">
+                          <TextBlock Text="{Binding Badge}" FontSize="9" FontWeight="Bold" Foreground="#93C5FD"/>
+                        </Border>
+                        <TextBlock Text="{Binding Name}" FontSize="13"/>
+                      </StackPanel>
+                      <TextBlock Text="{Binding Desc}" FontSize="10" Foreground="#475569" Margin="0,2,0,2"/>
+                    </StackPanel>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <!-- Info card -->
+              <Border Background="#0B1628" CornerRadius="8" Padding="12"
+                      BorderBrush="#1E3A8A" BorderThickness="1">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="{Binding SelectedModel.Desc}" FontSize="11" Foreground="#93C5FD"/>
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="Series:" FontSize="10" Foreground="#334155"/>
+                    <TextBlock Text="{Binding SelectedModel.Series}" FontSize="10" Foreground="#64748B"/>
+                    <TextBlock Text="  Max out:" FontSize="10" Foreground="#334155"/>
+                    <TextBlock Text="{Binding SelectedModel.MaxOut}" FontSize="10" Foreground="#64748B"/>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </Border>
+
+          <!-- Generation config -->
+          <Border Padding="20,14"
+                  BorderBrush="#1E293B" BorderThickness="0,0,0,1">
+            <StackPanel Spacing="14">
+              <TextBlock Text="⚗  Generation" FontSize="12" FontWeight="SemiBold" Foreground="#64748B"/>
+
+              <!-- Temperature -->
+              <StackPanel Spacing="6">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Grid.Column="0" Text="Temperature" FontSize="12" Foreground="#64748B"/>
+                  <TextBlock Grid.Column="1" Text="{Binding Temperature, StringFormat={}{0:F2}}"
+                             FontSize="12" Foreground="#3B82F6"/>
+                </Grid>
+                <Slider Minimum="0" Maximum="2" Value="{Binding Temperature}"
+                        TickFrequency="0.05" IsSnapToTickEnabled="True"/>
+              </StackPanel>
+
+              <!-- Max tokens -->
+              <StackPanel Spacing="6">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Grid.Column="0" Text="Max Output Tokens" FontSize="12" Foreground="#64748B"/>
+                  <TextBlock Grid.Column="1" Text="{Binding MaxTokens}"
+                             FontSize="12" Foreground="#3B82F6"/>
+                </Grid>
+                <Slider Minimum="256" Maximum="65536" Value="{Binding MaxTokens}"
+                        TickFrequency="256" IsSnapToTickEnabled="True"/>
+              </StackPanel>
+
+              <!-- Streaming toggle -->
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="Streaming" FontSize="12" Foreground="#64748B"/>
+                  <TextBlock Text="Watch responses generate live" FontSize="10" Foreground="#334155"/>
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableStreaming}"
+                              OnContent="" OffContent="" VerticalAlignment="Center"/>
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <!-- System prompt -->
+          <Border Padding="20,14"
+                  BorderBrush="#1E293B" BorderThickness="0,0,0,1">
+            <StackPanel Spacing="10">
+              <TextBlock Text="💬  System Prompt" FontSize="12" FontWeight="SemiBold" Foreground="#64748B"/>
+              <TextBox Text="{Binding SystemPrompt}"
+                       AcceptsReturn="True"
+                       MinHeight="90" MaxHeight="180"
+                       FontSize="12" TextWrapping="Wrap"/>
+            </StackPanel>
+          </Border>
+
+          <!-- Save -->
+          <Border Padding="20,16">
+            <Button Classes="primary" Command="{Binding SaveSettingsCommand}"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Height="42">
+              <TextBlock Text="Save Settings" FontSize="13" FontWeight="SemiBold"/>
+            </Button>
+          </Border>
+
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
+
+  </Grid>
+</Window>
