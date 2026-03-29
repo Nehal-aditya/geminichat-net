@@ -609,7 +609,7 @@ jobs:
           # FIX: <<-EOF strips leading tabs so [Desktop Entry] lands at col 0.
           #      Body lines are indented with a single tab character.
           DISPLAY_SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && DISPLAY_SUFFIX=" (${CHANNEL^})"
+          [ "${CHANNEL}" != "stable" ] && DISPLAY_SUFFIX=" ($(echo "${CHANNEL}" | sed 's/^[a-z]/\u&/'))"
           cat > "${STAGE}/usr/share/applications/${PKG_NAME}.desktop" <<-DESKTOP
           [Desktop Entry]
           Version=1.0
@@ -621,12 +621,12 @@ jobs:
           Terminal=false
           Categories=Network;Chat;Utility;
           StartupWMClass=${{ env.APP_NAME }}
-                  DESKTOP
+          DESKTOP
 
-                  # ── control file ──────────────────────────────────────────────
-                  # FIX: <<-EOF strips leading tabs; all field names land at col 0.
-                  INSTALLED_SIZE=$(du -sk "${STAGE}${INSTALL_DIR}" | cut -f1)
-                  cat > "${STAGE}/DEBIAN/control" <<-CTRL
+          # ── control file ──────────────────────────────────────────────
+          # FIX: <<-EOF strips leading tabs; all field names land at col 0.
+          INSTALLED_SIZE=$(du -sk "${STAGE}${INSTALL_DIR}" | cut -f1)
+          cat > "${STAGE}/DEBIAN/control" <<-CTRL
           Package: ${PKG_NAME}
           Version: ${PKG_VER}
           Architecture: ${{ matrix.deb_arch }}
@@ -639,7 +639,7 @@ jobs:
           Description: ${{ env.DEB_DESCRIPTION }}
           Google Gemini powered AI chatbot with streaming responses,
           persistent chat history, and support for multiple models.
-                  CTRL
+          CTRL
 
           # ── postinst: update icon cache ────────────────────────────────
           cat > "${STAGE}/DEBIAN/postinst" <<-'POSTINST'
@@ -651,17 +651,17 @@ jobs:
           if command -v update-desktop-database >/dev/null 2>&1; then
             update-desktop-database /usr/share/applications || true
           fi
-                  POSTINST
+          POSTINST
                   chmod 755 "${STAGE}/DEBIAN/postinst"
 
-                  # ── postrm: clean up ──────────────────────────────────────────
-                  cat > "${STAGE}/DEBIAN/postrm" <<-'POSTRM'
+          # ── postrm: clean up ──────────────────────────────────────────
+          cat > "${STAGE}/DEBIAN/postrm" <<-'POSTRM'
           #!/bin/sh
           set -e
           if command -v gtk-update-icon-cache >/dev/null 2>&1; then
             gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
           fi
-                  POSTRM
+          POSTRM
                   chmod 755 "${STAGE}/DEBIAN/postrm"
 
           # ── Build ─────────────────────────────────────────────────────
@@ -712,7 +712,7 @@ jobs:
 
           # ── .desktop entry (tab-stripped heredoc) ─────────────────────
           DISPLAY_SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && DISPLAY_SUFFIX=" (${CHANNEL^})"
+          [ "${CHANNEL}" != "stable" ] && DISPLAY_SUFFIX=" ($(echo "${CHANNEL}" | sed 's/^[a-z]/\u&/'))"
           cat > "${BROOT}/usr/share/applications/${PKG_NAME}.desktop" <<-DESKTOP
           [Desktop Entry]
           Version=1.0
@@ -724,7 +724,7 @@ jobs:
           Terminal=false
           Categories=Network;Chat;Utility;
           StartupWMClass=${{ env.APP_NAME }}
-                  DESKTOP
+          DESKTOP
 
           # ── SPEC file ─────────────────────────────────────────────────
           # FIX: %install is a no-op — files are already in BUILDROOT.
@@ -761,7 +761,7 @@ jobs:
 
           %postun
           /usr/bin/gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
-                  SPEC
+          SPEC
 
           # ── rpmbuild ──────────────────────────────────────────────────
           rpmbuild -bb \
@@ -913,7 +913,7 @@ jobs:
 
           # ── Info.plist ────────────────────────────────────────────────
           DISPLAY_SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && DISPLAY_SUFFIX=" (${CHANNEL^})"
+          [ "${CHANNEL}" != "stable" ] && DISPLAY_SUFFIX=" ($(echo "${CHANNEL}" | sed 's/^[a-z]/\u&/'))"
           COPYRIGHT_YEAR=$(date +%Y)
           cat > "${APP_BUNDLE}/Contents/Info.plist" <<-PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -936,7 +936,7 @@ jobs:
               <string>Copyright © ${COPYRIGHT_YEAR} GeminiChat. MIT License.</string>
           </dict>
           </plist>
-                  PLIST
+          PLIST
 
           # ── Icon: PNG → ICNS ──────────────────────────────────────────
           # FIX: sips cannot decode .ico files. Resolution order:
