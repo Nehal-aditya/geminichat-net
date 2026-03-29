@@ -682,52 +682,49 @@ jobs:
           PKG_VER="${{ needs.version.outputs.msi_version }}"
           RPM_NAME="${{ env.APP_NAME }}-${{ matrix.arch_label }}${SUFFIX}.rpm"
           INSTALL_DIR="/opt/$PKG_NAME"
-
+ 
           # ── RPM build tree ────────────────────────────────────────────
           RPM_ROOT="${HOME}/rpmbuild"
           mkdir -p "${RPM_ROOT}"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
-
-          # ── Stage all files directly into BUILDROOT ────────────────────
-          # FIX: We pre-populate BUILDROOT here in the shell step (where our
-          #      shell variables are defined), then reference only literal
-          #      paths inside the spec. The %install section just has a no-op
-          #      comment — all staging is already done.
-          BROOT="${RPM_ROOT}/BUILDROOT/${PKG_NAME}-${PKG_VER}-1.$(uname -m)"
-          mkdir -p "${BROOT}${INSTALL_DIR}"
-          mkdir -p "${BROOT}/usr/local/bin"
-          mkdir -p "${BROOT}/usr/share/applications"
-          mkdir -p "${BROOT}/usr/share/icons/hicolor/256x256/apps"
-
+ 
+          # ── Stage files into BUILD/stage (rpmbuild never wipes this dir) ──
+          # We cannot pre-populate BUILDROOT because rpmbuild's brp-* scripts
+          # rm -rf it at the start of %install before our files would be seen.
+          # Instead we stage into BUILD/stage, pass that path to the spec as
+          # the _stagedir macro, and do the actual install inside %install
+          # using %{buildroot} — the only safe place to write payload files.
+          STAGE_DIR="${RPM_ROOT}/BUILD/stage"
+          mkdir -p "${STAGE_DIR}${INSTALL_DIR}"
+          mkdir -p "${STAGE_DIR}/usr/local/bin"
+          mkdir -p "${STAGE_DIR}/usr/share/applications"
+          mkdir -p "${STAGE_DIR}/usr/share/icons/hicolor/256x256/apps"
+ 
           cp "publish/release/${{ matrix.rid }}/${{ env.APP_NAME }}" \
-             "${BROOT}${INSTALL_DIR}/${{ env.APP_NAME }}"
-          chmod 755 "${BROOT}${INSTALL_DIR}/${{ env.APP_NAME }}"
+             "${STAGE_DIR}${INSTALL_DIR}/${{ env.APP_NAME }}"
+          chmod 755 "${STAGE_DIR}${INSTALL_DIR}/${{ env.APP_NAME }}"
           cp package_icon.png \
-             "${BROOT}/usr/share/icons/hicolor/256x256/apps/${PKG_NAME}.png"
-
-          # Symlink into BUILDROOT so %files can list it
+             "${STAGE_DIR}/usr/share/icons/hicolor/256x256/apps/${PKG_NAME}.png"
           ln -sf "${INSTALL_DIR}/${{ env.APP_NAME }}" \
-                 "${BROOT}/usr/local/bin/${PKG_NAME}"
-
-          # ── .desktop entry (tab-stripped heredoc) ─────────────────────
+                 "${STAGE_DIR}/usr/local/bin/${PKG_NAME}"
+ 
+          # ── .desktop entry ────────────────────────────────────────────
           DISPLAY_SUFFIX=""
           [ "${CHANNEL}" != "stable" ] && DISPLAY_SUFFIX=" ($(echo "${CHANNEL}" | sed 's/^[a-z]/\u&/'))"
-          cat > "${BROOT}/usr/share/applications/${PKG_NAME}.desktop" <<-DESKTOP
-          [Desktop Entry]
-          Version=1.0
-          Type=Application
-          Name=${{ env.APP_NAME }}${DISPLAY_SUFFIX}
-          Comment=${{ env.RPM_SUMMARY }}
-          Exec=${INSTALL_DIR}/${{ env.APP_NAME }}
-          Icon=${PKG_NAME}
-          Terminal=false
-          Categories=Network;Chat;Utility;
-          StartupWMClass=${{ env.APP_NAME }}
-          DESKTOP
-
+          printf '[Desktop Entry]\n'                              > "${STAGE_DIR}/usr/share/applications/${PKG_NAME}.desktop"
+          printf 'Version=1.0\n'                                 >> "${STAGE_DIR}/usr/share/applications/${PKG_NAME}.desktop"
+          printf 'Type=Application\n'                            >> "${STAGE_DIR}/usr/share/applications/${PKG_NAME}.desktop"
+          printf 'Name=%s%s\n' "${{ env.APP_NAME }}" "${DISPLAY_SUFFIX}" >> "${STAGE_DIR}/usr/share/applications/${PKG_NAME}.desktop"
+          printf 'Comment=%s\n' "${{ env.RPM_SUMMARY }}"        >> "${STAGE_DIR}/usr/share/applications/${PKG_NAME}.desktop"
+          printf 'Exec=%s/%s\n' "${INSTALL_DIR}" "${{ env.APP_NAME }}"  >> "${STAGE_DIR}/usr/share/applications/${PKG_NAME}.desktop"
+          printf 'Icon=%s\n' "${PKG_NAME}"                      >> "${STAGE_DIR}/usr/share/applications/${PKG_NAME}.desktop"
+          printf 'Terminal=false\n'                              >> "${STAGE_DIR}/usr/share/applications/${PKG_NAME}.desktop"
+          printf 'Categories=Network;Chat;Utility;\n'            >> "${STAGE_DIR}/usr/share/applications/${PKG_NAME}.desktop"
+          printf 'StartupWMClass=%s\n' "${{ env.APP_NAME }}"    >> "${STAGE_DIR}/usr/share/applications/${PKG_NAME}.desktop"
+ 
           # ── SPEC file ─────────────────────────────────────────────────
-          # FIX: %install is a no-op — files are already in BUILDROOT.
-          # FIX: All paths in %files are literal strings (no shell variables).
-          # FIX: %dir /opt/<pkg> declares directory ownership for clean uninstall.
+          # %install copies from %{_stagedir} (our BUILD/stage) into
+          # %{buildroot}, which is the correct rpmbuild-managed location.
+          # %{_stagedir} is passed in via --define below.
           cat > "${RPM_ROOT}/SPECS/${PKG_NAME}.spec" <<-SPEC
           Name:           ${PKG_NAME}
           Version:        ${PKG_VER}
@@ -737,37 +734,36 @@ jobs:
           URL:            https://github.com/${{ github.repository }}
           BuildArch:      ${{ matrix.rpm_arch }}
           Requires:       libX11, libICE, libSM, fontconfig
-
+        
           %description
           Google Gemini powered AI chatbot with streaming responses,
           persistent chat history, and multiple model support.
-
+        
           %install
-          # Files are pre-staged into %{buildroot} by the CI shell step above.
-          # Nothing to do here.
-
+          cp -a %{_stagedir}/. %{buildroot}/
+        
           %files
           %dir /opt/${PKG_NAME}
           /opt/${PKG_NAME}/${{ env.APP_NAME }}
           /usr/local/bin/${PKG_NAME}
           /usr/share/applications/${PKG_NAME}.desktop
           /usr/share/icons/hicolor/256x256/apps/${PKG_NAME}.png
-
+        
           %post
           /usr/bin/gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
           /usr/bin/update-desktop-database /usr/share/applications 2>/dev/null || true
-
+        
           %postun
           /usr/bin/gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
           SPEC
-
+        
           # ── rpmbuild ──────────────────────────────────────────────────
           rpmbuild -bb \
-            --buildroot="${BROOT}" \
             --define "_topdir ${RPM_ROOT}" \
             --define "_bindir /usr/local/bin" \
+            --define "_stagedir ${STAGE_DIR}" \
             "${RPM_ROOT}/SPECS/${PKG_NAME}.spec"
-
+ 
           # Find and copy the produced RPM
           RPM_FILE=$(find "${RPM_ROOT}/RPMS" -name "*.rpm" | head -1)
           if [ -z "$RPM_FILE" ]; then
