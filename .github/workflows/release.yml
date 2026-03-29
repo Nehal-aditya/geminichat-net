@@ -3,22 +3,12 @@ name: Release
 # ─────────────────────────────────────────────────────────────────────────────
 # TRIGGER RULES
 #
-# Stable:      git tag v1.2.3
-# Pre-release: git tag v1.2.3-alpha.1 / -beta.2 / -rc.1 / -preview.1
-# Manual:      Actions → Release → Run workflow
+# Stable:    git tag v1.2.3   → push
+# Pre-release tags:
+#            v1.2.3-alpha.1   v1.2.3-beta.2
+#            v1.2.3-rc.1      v1.2.3-preview.1
 #
-# ARTIFACTS PRODUCED PER RELEASE
-# ┌─────────────────────────────────────────────┬────────────────────────────┐
-# │ Windows                                     │ Linux                      │
-# │  GeminiChat-x64.exe        portable         │  GeminiChat-x64.deb        │
-# │  GeminiChat-arm64.exe      portable         │  GeminiChat-arm64.deb      │
-# │  GeminiChat-x64.msi        installer        │  GeminiChat-x64.rpm        │
-# │  GeminiChat-arm64.msi      installer        │  GeminiChat-arm64.rpm      │
-# ├─────────────────────────────────────────────┼────────────────────────────┤
-# │ macOS                                       │ Debug symbols (all)        │
-# │  GeminiChat-macos-x64.dmg  Intel            │  GeminiChat-x64.pdb.zip    │
-# │  GeminiChat-macos-arm64.dmg Apple Silicon   │  GeminiChat-arm64.pdb.zip  │
-# └─────────────────────────────────────────────┴────────────────────────────┘
+# Manual:    Actions → Release → Run workflow
 # ─────────────────────────────────────────────────────────────────────────────
 on:
   push:
@@ -50,7 +40,6 @@ on:
 # ─────────────────────────────────────────────────────────────────────────────
 env:
   APP_NAME:                    GeminiChat
-  APP_ID:                      com.geminichat.app          # macOS bundle ID
   DOTNET_VERSION:              '8.0.x'
   PROJECT_PATH:                GeminiChat.csproj
   DOTNET_NOLOGO:               true
@@ -58,10 +47,6 @@ env:
   WIX_VERSION:                 '5.0.2'
   WIX_UI_EXT_VERSION:          '5.0.1'
   APP_ICON:                    Assets/app.ico
-  APP_ICON_PNG:                Assets/app.png              # used by Linux .desktop + macOS
-  DEB_MAINTAINER:              'GeminiChat <noreply@geminichat.app>'
-  DEB_DESCRIPTION:             'AI chatbot powered by Google Gemini'
-  RPM_SUMMARY:                 'AI chatbot powered by Google Gemini'
 
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
@@ -99,7 +84,6 @@ jobs:
             fi
             TAG="v${VERSION}"
           fi
-
           IS_PRERELEASE="false"
           CHANNEL="stable"
           if   [[ "${VERSION}" == *"-alpha"*   ]]; then CHANNEL="alpha";   IS_PRERELEASE="true"
@@ -108,9 +92,8 @@ jobs:
           elif [[ "${VERSION}" == *"-preview"* ]]; then CHANNEL="preview"; IS_PRERELEASE="true"
           elif [[ "${VERSION}" == *"-"*        ]]; then CHANNEL="pre";     IS_PRERELEASE="true"
           fi
-
+          # MSI version must be purely numeric — strip pre-release suffix
           MSI_VERSION="${VERSION%%-*}"
-
           case "${CHANNEL}" in
             alpha)   DISPLAY="Gemini Chat v${VERSION} (Alpha)" ;;
             beta)    DISPLAY="Gemini Chat v${VERSION} (Beta)" ;;
@@ -119,7 +102,6 @@ jobs:
             pre)     DISPLAY="Gemini Chat v${VERSION} (Pre-release)" ;;
             *)       DISPLAY="Gemini Chat v${VERSION}" ;;
           esac
-
           echo "version=${VERSION}"             >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}"                     >> "$GITHUB_OUTPUT"
           echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
@@ -127,14 +109,12 @@ jobs:
           echo "is_draft=${IS_DRAFT}"           >> "$GITHUB_OUTPUT"
           echo "display_name=${DISPLAY}"        >> "$GITHUB_OUTPUT"
           echo "msi_version=${MSI_VERSION}"     >> "$GITHUB_OUTPUT"
-
           echo "version=${VERSION}  tag=${TAG}  channel=${CHANNEL}  msi_version=${MSI_VERSION}"
-
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 2 — Windows: portable single-file EXE + debug PDB (x64 + arm64)
+  # JOB 2 — Build portable single-file EXE (x64 + arm64)
   # ───────────────────────────────────────────────────────────────────────────
   build-exe:
-    name: Windows EXE · ${{ matrix.arch_label }}
+    name: Build EXE · ${{ matrix.arch_label }}
     needs: version
     runs-on: windows-latest
     strategy:
@@ -158,8 +138,7 @@ jobs:
       - name: Restore
         run: dotnet restore ${{ env.PROJECT_PATH }}
 
-      # ── Release build (portable, single file) ─────────────────────────────
-      - name: Publish release EXE
+      - name: Publish single-file EXE
         shell: pwsh
         run: |
           $msiVer = "${{ needs.version.outputs.msi_version }}"
@@ -175,75 +154,35 @@ jobs:
             -p:AssemblyVersion="$msiVer" `
             -p:FileVersion="$msiVer" `
             -p:InformationalVersion="${{ needs.version.outputs.version }}" `
-            --output "publish/release/${{ matrix.rid }}"
-
-      # ── Debug build — produces .pdb alongside the binary ──────────────────
-      - name: Publish debug EXE (for symbols)
-        shell: pwsh
-        run: |
-          $msiVer = "${{ needs.version.outputs.msi_version }}"
-          dotnet publish ${{ env.PROJECT_PATH }} `
-            --configuration Debug `
-            --runtime ${{ matrix.rid }} `
-            --self-contained true `
-            -p:PublishSingleFile=false `
-            -p:DebugType=portable `
-            -p:DebugSymbols=true `
-            -p:Version="${{ needs.version.outputs.version }}" `
-            -p:AssemblyVersion="$msiVer" `
-            -p:FileVersion="$msiVer" `
-            --output "publish/debug/${{ matrix.rid }}"
-
-      - name: Rename & verify EXE
+            --output "publish/${{ matrix.rid }}"
+      - name: Rename EXE with arch + channel suffix
         shell: pwsh
         run: |
           $channel = "${{ needs.version.outputs.channel }}"
           $suffix  = if ($channel -ne "stable") { "-$channel" } else { "" }
-          $src = "publish/release/${{ matrix.rid }}/${{ env.APP_NAME }}.exe"
-          $dst = "publish/release/${{ matrix.rid }}/${{ env.APP_NAME }}-${{ matrix.arch_label }}${suffix}.exe"
-          if (-not (Test-Path $src)) { throw "EXE not found: $src" }
+          $src     = "publish/${{ matrix.rid }}/${{ env.APP_NAME }}.exe"
+          $dst     = "publish/${{ matrix.rid }}/${{ env.APP_NAME }}-${{ matrix.arch_label }}${suffix}.exe"
+          if (-not (Test-Path $src)) { throw "EXE not found at: $src" }
           Move-Item $src $dst -Force
-          Write-Host "EXE: $dst  ($([int](Get-Item $dst).Length / 1MB) MB)"
-
-      - name: Collect PDB files
-        shell: pwsh
-        run: |
-          $channel = "${{ needs.version.outputs.channel }}"
-          $suffix  = if ($channel -ne "stable") { "-$channel" } else { "" }
-          $pdbDir  = "publish/debug/${{ matrix.rid }}"
-          $zipName = "${{ env.APP_NAME }}-${{ matrix.arch_label }}-win${suffix}.pdb.zip"
-          $pdbs    = Get-ChildItem $pdbDir -Filter "*.pdb" -Recurse
-          if ($pdbs.Count -eq 0) { Write-Warning "No PDB files found — debug symbols unavailable" }
-          else {
-            Compress-Archive -Path ($pdbs | Select-Object -ExpandProperty FullName) `
-              -DestinationPath "publish/debug/$zipName" -Force
-            Write-Host "PDB zip: $zipName  ($($pdbs.Count) files)"
-          }
-
+          Write-Host "Artifact: $dst  ($([int](Get-Item $dst).Length / 1MB) MB)"
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: exe-${{ matrix.rid }}
-          path: publish/release/${{ matrix.rid }}/*.exe
-          retention-days: 3
-
-      - name: Upload PDB artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pdb-win-${{ matrix.rid }}
-          path: publish/debug/*.pdb.zip
-          if-no-files-found: warn
+          path: publish/${{ matrix.rid }}/*.exe
           retention-days: 3
 
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 3 — Windows: MSI installer (x64 + arm64)
-  # Uses WiX v5.0.2 pinned, UI ext 5.0.1 fetched directly from NuGet.
-  # Publishes single-file so WXS references exactly one explicit EXE.
-  # Shortcuts use Target="[#MainExe]" (file-reference syntax) so the
-  # MSI engine resolves to the actual installed path — fixes broken shortcuts.
+  # JOB 3 — Build MSI installer (x64 + arm64)
+  #
+  # KEY FIX: We publish with PublishSingleFile=true so the output is exactly
+  # one .exe file. The WXS then references it explicitly with <File Source=...>
+  # keyed as KeyPath="yes", and both shortcuts point at [#MainExe] (the MSI
+  # property that resolves to the installed file path). This eliminates the
+  # "missing target" shortcut error caused by glob harvesting.
   # ───────────────────────────────────────────────────────────────────────────
   build-msi:
-    name: Windows MSI · ${{ matrix.arch_label }}
+    name: Build MSI · ${{ matrix.arch_label }}
     needs: version
     runs-on: windows-latest
     strategy:
@@ -266,37 +205,42 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      # ── Install WiX CLI pinned to v5.0.2 ──────────────────────────────────
       - name: Install WiX CLI v${{ env.WIX_VERSION }}
         run: dotnet tool install --global wix --version ${{ env.WIX_VERSION }}
 
-      - name: Fetch WixToolset.UI.wixext v${{ env.WIX_UI_EXT_VERSION }} from NuGet
+      # ── Fetch WixToolset.UI.wixext 5.0.1 directly from NuGet ─────────────
+      # Avoids `wix extension add` which ignores version pins and can pull
+      # incompatible prerelease builds.
+      - name: Fetch WixToolset.UI.wixext v${{ env.WIX_UI_EXT_VERSION }}
         shell: pwsh
         run: |
           $pkg   = "WixToolset.UI.wixext"
           $ver   = "${{ env.WIX_UI_EXT_VERSION }}"
           $dest  = "wixext"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-
           $url   = "https://www.nuget.org/api/v2/package/$pkg/$ver"
           $nupkg = "$dest/$pkg.$ver.nupkg"
           Invoke-WebRequest -Uri $url -OutFile $nupkg -UseBasicParsing
+          Write-Host "Downloaded: $nupkg"
           Expand-Archive -Path $nupkg -DestinationPath "$dest/extracted" -Force
-
+          # Look for the wixext5 subfolder first (correct for WiX v5)
           $dll = Get-ChildItem "$dest/extracted" -Filter "WixToolset.UI.wixext.dll" -Recurse |
-                   Where-Object { $_.FullName -match "wixext5" } | Select-Object -First 1
+                   Where-Object { $_.FullName -match "wixext5" } |
+                   Select-Object -First 1
           if (-not $dll) {
+            # Fallback: any DLL with that name
             $dll = Get-ChildItem "$dest/extracted" -Filter "WixToolset.UI.wixext.dll" -Recurse |
                      Select-Object -First 1
           }
           if (-not $dll) { throw "WixToolset.UI.wixext.dll not found in package" }
-
           Write-Host "UI ext DLL → $($dll.FullName)"
           $dll.FullName | Out-File "wixext/ui_ext_dll.txt" -Encoding utf8 -NoNewline
-
-      - name: Restore
+      - name: Restore app
         run: dotnet restore ${{ env.PROJECT_PATH }}
 
-      - name: Publish (single-file for MSI)
+      # ── IMPORTANT: publish as single-file so we get exactly one .exe ──────
+      - name: Publish app (single-file for MSI)
         shell: pwsh
         run: |
           $msiVer = "${{ needs.version.outputs.msi_version }}"
@@ -313,26 +257,26 @@ jobs:
             -p:FileVersion="$msiVer" `
             -p:InformationalVersion="${{ needs.version.outputs.version }}" `
             --output "msi-src/${{ matrix.rid }}"
-
+          # Verify the exe exists before continuing
           $exe = "msi-src/${{ matrix.rid }}/${{ env.APP_NAME }}.exe"
           if (-not (Test-Path $exe)) {
+            Write-Host "Contents of msi-src/${{ matrix.rid }}:"
             Get-ChildItem "msi-src/${{ matrix.rid }}" | ForEach-Object { Write-Host "  $($_.Name)" }
             throw "Expected EXE not found: $exe"
           }
           Write-Host "EXE ready: $exe  ($([int](Get-Item $exe).Length / 1MB) MB)"
-
       - name: Generate Product.wxs
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path wix | Out-Null
-
           $msiVersion  = "${{ needs.version.outputs.msi_version }}"
           $channel     = "${{ needs.version.outputs.channel }}"
           $rid         = "${{ matrix.rid }}"
           $appName     = "${{ env.APP_NAME }}"
           $exeSrc      = "${{ github.workspace }}\msi-src\$rid\$appName.exe"
           $icoSrc      = "${{ github.workspace }}\${{ env.APP_ICON }}"
-
+          # Stable and pre-release use different upgrade codes so they
+          # can coexist side-by-side on the same machine.
           $nameSuffix  = if ($channel -ne "stable") { " ($channel)" } else { "" }
           $displayName = "${appName}${nameSuffix}"
           $upgradeCode = if ($channel -eq "stable") {
@@ -340,33 +284,34 @@ jobs:
           } else {
             "B2C3D4E5-F6A7-8901-BCDE-F01234567891"
           }
+          # Registry key suffix so stable+prerelease don't collide in HKCU
           $regKey = "Software\GeminiChat\$channel"
-
           $wxs = @"
           <?xml version="1.0" encoding="UTF-8"?>
           <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
               xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-
             <Package Name="$displayName"
                     Manufacturer="GeminiChat"
                     Version="$msiVersion"
                     UpgradeCode="$upgradeCode"
                     Scope="perUser">
-
               <MajorUpgrade
                 DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first." />
               <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
               <ui:WixUI Id="WixUI_InstallDir" />
               <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
-
+              <!--
+                Icon declaration: WiX embeds the ICO into the MSI and uses it for
+                Add/Remove Programs entry. The Id must end in ".exe" or ".ico" so
+                WiX knows the resource type.
+              -->
               <Icon Id="AppIcon.ico" SourceFile="$icoSrc" />
               <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
-
               <Feature Id="MainFeature" Title="$appName" Level="1">
                 <ComponentRef Id="MainExeComponent" />
                 <ComponentRef Id="ShortcutComponent" />
               </Feature>
-
+              <!-- Install to %LocalAppData%\GeminiChat  (no admin required) -->
               <StandardDirectory Id="LocalAppDataFolder">
                 <Directory Id="INSTALLFOLDER" Name="$displayName" />
               </StandardDirectory>
@@ -374,35 +319,68 @@ jobs:
               <StandardDirectory Id="ProgramMenuFolder">
                 <Directory Id="AppMenuFolder" Name="$displayName" />
               </StandardDirectory>
-
-              <Component Id="MainExeComponent" Directory="INSTALLFOLDER"
+              <!--
+                MainExeComponent:
+                - Explicitly references the single published EXE by full source path.
+                - KeyPath="yes" on the <File> element means the MSI tracks this file
+                  directly; the shortcuts below reference [#MainExe] which resolves
+                  to the correct installed path. This is what fixes the broken shortcut.
+              -->
+              <Component Id="MainExeComponent"
+                        Directory="INSTALLFOLDER"
                         Guid="D4E5F6A7-B8C9-0123-DEFA-123456789003">
-                <File Id="MainExe" Source="$exeSrc" Name="$appName.exe" KeyPath="yes" />
+                <File Id="MainExe"
+                      Source="$exeSrc"
+                      Name="$appName.exe"
+                      KeyPath="yes" />
               </Component>
-
-              <Component Id="ShortcutComponent" Directory="INSTALLFOLDER"
+              <!--
+                ShortcutComponent:
+                - Shortcuts use Target="[#MainExe]" — the [#FileId] syntax tells the
+                  MSI engine to resolve to the installed location of that File element.
+                  This is the only reliable way to create shortcuts in per-user installs.
+                - Icon="AppIcon.ico" wires the embedded ICO to both shortcuts so they
+                  display the correct icon in the Start Menu and on the Desktop.
+                - Anchored by a registry value (required by WiX for non-advertised
+                  shortcuts without a file KeyPath in the same component).
+              -->
+              <Component Id="ShortcutComponent"
+                        Directory="INSTALLFOLDER"
                         Guid="E5F6A7B8-C9D0-1234-EFAB-234567890014">
-                <RegistryValue Root="HKCU" Key="$regKey" Name="Installed"
-                              Type="integer" Value="1" KeyPath="yes" />
-                <Shortcut Id="DesktopShortcut" Directory="DesktopFolder"
-                          Name="$displayName" Target="[#MainExe]"
-                          WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" Advertise="no" />
-                <Shortcut Id="StartMenuShortcut" Directory="AppMenuFolder"
-                          Name="$appName" Target="[#MainExe]"
-                          WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" Advertise="no" />
-                <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
+                <RegistryValue Root="HKCU"
+                              Key="$regKey"
+                              Name="Installed"
+                              Type="integer"
+                              Value="1"
+                              KeyPath="yes" />
+                <Shortcut Id="DesktopShortcut"
+                          Directory="DesktopFolder"
+                          Name="$displayName"
+                          Target="[#MainExe]"
+                          WorkingDirectory="INSTALLFOLDER"
+                          Icon="AppIcon.ico"
+                          Advertise="no" />
+                <Shortcut Id="StartMenuShortcut"
+                          Directory="AppMenuFolder"
+                          Name="$appName"
+                          Target="[#MainExe]"
+                          WorkingDirectory="INSTALLFOLDER"
+                          Icon="AppIcon.ico"
+                          Advertise="no" />
+                <RemoveFolder Id="RemoveAppMenuFolder"
+                              Directory="AppMenuFolder"
+                              On="uninstall" />
               </Component>
-
             </Package>
           </Wix>
           "@
-
           Set-Content -Path "wix/Product.wxs" -Value $wxs -Encoding UTF8
-          Write-Host "Generated Product.wxs  channel=$channel  arch=${{ matrix.wix_arch }}"
+          Write-Host "Generated Product.wxs"
           Write-Host "  display : $displayName"
           Write-Host "  exe src : $exeSrc"
           Write-Host "  ico src : $icoSrc"
-
+          Write-Host "  channel : $channel"
+          Write-Host "  arch    : ${{ matrix.wix_arch }}"
       - name: Build MSI
         shell: pwsh
         run: |
@@ -410,18 +388,15 @@ jobs:
           $suffix   = if ($channel -ne "stable") { "-$channel" } else { "" }
           $outName  = "${{ env.APP_NAME }}-${{ matrix.arch_label }}${suffix}.msi"
           $uiExtDll = (Get-Content "wixext/ui_ext_dll.txt" -Raw).Trim()
-
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Write-Host "Building: $outName"
-
+          Write-Host "UI ext:   $uiExtDll"
           wix build wix/Product.wxs `
             -arch ${{ matrix.wix_arch }} `
             -ext "$uiExtDll" `
             -o "dist/$outName"
-
           $size = '{0:N1}' -f ((Get-Item "dist/$outName").Length / 1MB)
           Write-Host "Done: dist/$outName  (${size} MB)"
-
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
         with:
@@ -430,584 +405,11 @@ jobs:
           retention-days: 3
 
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 4 — Linux: .deb and .rpm packages (x64 + arm64)
-  #
-  # Strategy:
-  #   • Publish self-contained single binary (no runtime dependency)
-  #   • Build .deb manually (control file + dpkg-deb) — no extra tooling needed
-  #   • Build .rpm via rpmbuild — installed from apt on ubuntu-latest
-  #   • Install to /opt/geminichat/ with a symlink in /usr/local/bin
-  #   • Drop a .desktop file for application menu integration
-  #   • Debug symbols: separate debug publish + zipped .pdb files
-  # ───────────────────────────────────────────────────────────────────────────
-  build-linux:
-    name: Linux ${{ matrix.pkg }} · ${{ matrix.arch_label }}
-    needs: version
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - rid:        linux-x64
-            arch_label: x64
-            deb_arch:   amd64
-            rpm_arch:   x86_64
-          - rid:        linux-arm64
-            arch_label: arm64
-            deb_arch:   arm64
-            rpm_arch:   aarch64
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Install packaging tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            dpkg-dev \
-            rpm \
-            fakeroot \
-            imagemagick
-
-      - name: Restore
-        run: dotnet restore ${{ env.PROJECT_PATH }}
-
-      # ── Release publish ────────────────────────────────────────────────────
-      - name: Publish release binary
-        run: |
-          MSI_VER="${{ needs.version.outputs.msi_version }}"
-          dotnet publish ${{ env.PROJECT_PATH }} \
-            --configuration Release \
-            --runtime ${{ matrix.rid }} \
-            --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:EnableCompressionInSingleFile=true \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
-            -p:Version="${{ needs.version.outputs.version }}" \
-            -p:AssemblyVersion="${MSI_VER}" \
-            -p:FileVersion="${MSI_VER}" \
-            -p:InformationalVersion="${{ needs.version.outputs.version }}" \
-            --output "publish/release/${{ matrix.rid }}"
-
-          BIN="publish/release/${{ matrix.rid }}/${{ env.APP_NAME }}"
-          if [ ! -f "$BIN" ]; then
-            echo "ERROR: binary not found at $BIN"
-            ls -la "publish/release/${{ matrix.rid }}/" && exit 1
-          fi
-          chmod +x "$BIN"
-          echo "Binary: $BIN ($(du -sh "$BIN" | cut -f1))"
-
-      # ── Debug publish ──────────────────────────────────────────────────────
-      - name: Publish debug binary (for symbols)
-        run: |
-          MSI_VER="${{ needs.version.outputs.msi_version }}"
-          dotnet publish ${{ env.PROJECT_PATH }} \
-            --configuration Debug \
-            --runtime ${{ matrix.rid }} \
-            --self-contained true \
-            -p:PublishSingleFile=false \
-            -p:DebugType=portable \
-            -p:DebugSymbols=true \
-            -p:Version="${{ needs.version.outputs.version }}" \
-            -p:AssemblyVersion="${MSI_VER}" \
-            --output "publish/debug/${{ matrix.rid }}"
-
-      - name: Collect Linux PDB files
-        run: |
-          CHANNEL="${{ needs.version.outputs.channel }}"
-          SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && SUFFIX="-${CHANNEL}"
-          ZIP_NAME="${{ env.APP_NAME }}-${{ matrix.arch_label }}-linux${SUFFIX}.pdb.zip"
-          PDBS=$(find "publish/debug/${{ matrix.rid }}" -name "*.pdb" 2>/dev/null)
-          if [ -z "$PDBS" ]; then
-            echo "WARNING: no .pdb files found"
-          else
-            zip -j "publish/debug/${ZIP_NAME}" $PDBS
-            echo "PDB zip: ${ZIP_NAME}"
-          fi
-
-      # ── Prepare icon (PNG required for Linux) ─────────────────────────────
-      - name: Prepare PNG icon
-        run: |
-          ICON_SRC="${{ env.APP_ICON_PNG }}"
-          # If only ICO is available, convert it
-          if [ ! -f "$ICON_SRC" ] && [ -f "${{ env.APP_ICON }}" ]; then
-            convert "${{ env.APP_ICON }}"[0] -resize 256x256 assets_icon.png
-            ICON_SRC="assets_icon.png"
-          elif [ ! -f "$ICON_SRC" ]; then
-            # Generate a placeholder icon if none exists
-            convert -size 256x256 xc:'#1E3A8A' \
-              -fill '#60A5FA' -font DejaVu-Sans-Bold -pointsize 120 \
-              -gravity center -annotate 0 'G' assets_icon.png
-            ICON_SRC="assets_icon.png"
-          fi
-          cp "$ICON_SRC" package_icon.png
-          echo "Icon: $ICON_SRC"
-
-      # ── Build .deb ────────────────────────────────────────────────────────
-      - name: Build .deb package
-        run: |
-          CHANNEL="${{ needs.version.outputs.channel }}"
-          SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && SUFFIX="-${CHANNEL}"
-          PKG_NAME=$(echo "${{ env.APP_NAME }}" | tr '[:upper:]' '[:lower:]')
-          PKG_VER="${{ needs.version.outputs.msi_version }}"
-          DEB_NAME="${{ env.APP_NAME }}-${{ matrix.arch_label }}${SUFFIX}.deb"
-          INSTALL_DIR="/opt/$PKG_NAME"
-          STAGE="deb_stage"
-
-          # ── Directory tree ─────────────────────────────────────────────
-          mkdir -p "${STAGE}/DEBIAN"
-          mkdir -p "${STAGE}${INSTALL_DIR}"
-          mkdir -p "${STAGE}/usr/local/bin"
-          mkdir -p "${STAGE}/usr/share/applications"
-          mkdir -p "${STAGE}/usr/share/icons/hicolor/256x256/apps"
-
-          # ── Binary ────────────────────────────────────────────────────
-          cp "publish/release/${{ matrix.rid }}/${{ env.APP_NAME }}" \
-             "${STAGE}${INSTALL_DIR}/${{ env.APP_NAME }}"
-          chmod 755 "${STAGE}${INSTALL_DIR}/${{ env.APP_NAME }}"
-
-          # ── Symlink in /usr/local/bin ──────────────────────────────────
-          ln -s "${INSTALL_DIR}/${{ env.APP_NAME }}" \
-                "${STAGE}/usr/local/bin/$(echo ${{ env.APP_NAME }} | tr '[:upper:]' '[:lower:]')"
-
-          # ── Icon ──────────────────────────────────────────────────────
-          cp package_icon.png \
-             "${STAGE}/usr/share/icons/hicolor/256x256/apps/${PKG_NAME}.png"
-
-          # ── .desktop entry ────────────────────────────────────────────
-          DISPLAY_SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && DISPLAY_SUFFIX=" (${CHANNEL^})"
-          cat > "${STAGE}/usr/share/applications/${PKG_NAME}.desktop" << DESKTOP
-          [Desktop Entry]
-          Version=1.0
-          Type=Application
-          Name=${{ env.APP_NAME }}${DISPLAY_SUFFIX}
-          Comment=${{ env.DEB_DESCRIPTION }}
-          Exec=${INSTALL_DIR}/${{ env.APP_NAME }}
-          Icon=${PKG_NAME}
-          Terminal=false
-          Categories=Network;Chat;Utility;
-          StartupWMClass=${{ env.APP_NAME }}
-          DESKTOP
-
-          # ── control file ──────────────────────────────────────────────
-          INSTALLED_SIZE=$(du -sk "${STAGE}${INSTALL_DIR}" | cut -f1)
-          cat > "${STAGE}/DEBIAN/control" << CTRL
-          Package: ${PKG_NAME}
-          Version: ${PKG_VER}
-          Architecture: ${{ matrix.deb_arch }}
-          Maintainer: ${{ env.DEB_MAINTAINER }}
-          Installed-Size: ${INSTALLED_SIZE}
-          Depends: libx11-6, libice6, libsm6, libfontconfig1
-          Section: net
-          Priority: optional
-          Homepage: https://github.com/${{ github.repository }}
-          Description: ${{ env.DEB_DESCRIPTION }}
-           Google Gemini powered AI chatbot with streaming responses,
-           persistent chat history, and support for multiple models.
-          CTRL
-
-          # ── postinst: update icon cache ────────────────────────────────
-          cat > "${STAGE}/DEBIAN/postinst" << 'POSTINST'
-          #!/bin/sh
-          set -e
-          if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-            gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
-          fi
-          if command -v update-desktop-database >/dev/null 2>&1; then
-            update-desktop-database /usr/share/applications || true
-          fi
-          POSTINST
-          chmod 755 "${STAGE}/DEBIAN/postinst"
-
-          # ── postrm: clean up ──────────────────────────────────────────
-          cat > "${STAGE}/DEBIAN/postrm" << 'POSTRM'
-          #!/bin/sh
-          set -e
-          if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-            gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
-          fi
-          POSTRM
-          chmod 755 "${STAGE}/DEBIAN/postrm"
-
-          # ── Build ─────────────────────────────────────────────────────
-          fakeroot dpkg-deb --build "${STAGE}" "dist/${DEB_NAME}"
-          echo "Built: dist/${DEB_NAME}  ($(du -sh "dist/${DEB_NAME}" | cut -f1))"
-
-      # ── Build .rpm ────────────────────────────────────────────────────────
-      - name: Build .rpm package
-        run: |
-          CHANNEL="${{ needs.version.outputs.channel }}"
-          SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && SUFFIX="-${CHANNEL}"
-          PKG_NAME=$(echo "${{ env.APP_NAME }}" | tr '[:upper:]' '[:lower:]')
-          PKG_VER="${{ needs.version.outputs.msi_version }}"
-          RPM_NAME="${{ env.APP_NAME }}-${{ matrix.arch_label }}${SUFFIX}.rpm"
-          INSTALL_DIR="/opt/$PKG_NAME"
-
-          # ── RPM build tree ────────────────────────────────────────────
-          RPM_ROOT="${HOME}/rpmbuild"
-          mkdir -p "${RPM_ROOT}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-
-          # ── Stage binary + assets into BUILD ──────────────────────────
-          STAGE="${RPM_ROOT}/BUILD/${PKG_NAME}-${PKG_VER}"
-          mkdir -p "${STAGE}${INSTALL_DIR}"
-          mkdir -p "${STAGE}/usr/local/bin"
-          mkdir -p "${STAGE}/usr/share/applications"
-          mkdir -p "${STAGE}/usr/share/icons/hicolor/256x256/apps"
-
-          cp "publish/release/${{ matrix.rid }}/${{ env.APP_NAME }}" \
-             "${STAGE}${INSTALL_DIR}/${{ env.APP_NAME }}"
-          chmod 755 "${STAGE}${INSTALL_DIR}/${{ env.APP_NAME }}"
-          cp package_icon.png \
-             "${STAGE}/usr/share/icons/hicolor/256x256/apps/${PKG_NAME}.png"
-
-          DISPLAY_SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && DISPLAY_SUFFIX=" (${CHANNEL^})"
-          cat > "${STAGE}/usr/share/applications/${PKG_NAME}.desktop" << DESKTOP
-          [Desktop Entry]
-          Version=1.0
-          Type=Application
-          Name=${{ env.APP_NAME }}${DISPLAY_SUFFIX}
-          Comment=${{ env.RPM_SUMMARY }}
-          Exec=${INSTALL_DIR}/${{ env.APP_NAME }}
-          Icon=${PKG_NAME}
-          Terminal=false
-          Categories=Network;Chat;Utility;
-          StartupWMClass=${{ env.APP_NAME }}
-          DESKTOP
-
-          # ── SPEC file ─────────────────────────────────────────────────
-          cat > "${RPM_ROOT}/SPECS/${PKG_NAME}.spec" << SPEC
-          Name:           ${PKG_NAME}
-          Version:        ${PKG_VER}
-          Release:        1%{?dist}
-          Summary:        ${{ env.RPM_SUMMARY }}
-          License:        MIT
-          URL:            https://github.com/${{ github.repository }}
-          BuildArch:      ${{ matrix.rpm_arch }}
-          Requires:       libX11, libICE, libSM, fontconfig
-
-          %description
-          Google Gemini powered AI chatbot with streaming responses,
-          persistent chat history, and multiple model support.
-
-          %install
-          cp -a ${STAGE}/* %{buildroot}/
-
-          %files
-          %{_prefix}/local/bin/${PKG_NAME}
-          ${INSTALL_DIR}/${{ env.APP_NAME }}
-          /usr/share/applications/${PKG_NAME}.desktop
-          /usr/share/icons/hicolor/256x256/apps/${PKG_NAME}.png
-
-          %post
-          /usr/bin/gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
-          /usr/bin/update-desktop-database /usr/share/applications 2>/dev/null || true
-
-          %postun
-          /usr/bin/gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
-          SPEC
-
-          # Create the symlink in BUILD stage for %files
-          ln -sf "${INSTALL_DIR}/${{ env.APP_NAME }}" \
-                 "${STAGE}/usr/local/bin/${PKG_NAME}"
-
-          # ── rpmbuild ──────────────────────────────────────────────────
-          rpmbuild -bb \
-            --buildroot="${RPM_ROOT}/BUILDROOT" \
-            --define "_topdir ${RPM_ROOT}" \
-            --define "_bindir /usr/local/bin" \
-            "${RPM_ROOT}/SPECS/${PKG_NAME}.spec"
-
-          # Find and copy the produced RPM
-          RPM_FILE=$(find "${RPM_ROOT}/RPMS" -name "*.rpm" | head -1)
-          if [ -z "$RPM_FILE" ]; then
-            echo "ERROR: rpmbuild did not produce a .rpm file" && exit 1
-          fi
-          mkdir -p dist
-          cp "$RPM_FILE" "dist/${RPM_NAME}"
-          echo "Built: dist/${RPM_NAME}  ($(du -sh "dist/${RPM_NAME}" | cut -f1))"
-
-      - name: Upload .deb artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: deb-${{ matrix.rid }}
-          path: dist/*.deb
-          retention-days: 3
-
-      - name: Upload .rpm artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rpm-${{ matrix.rid }}
-          path: dist/*.rpm
-          retention-days: 3
-
-      - name: Upload Linux PDB artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pdb-linux-${{ matrix.rid }}
-          path: publish/debug/*.pdb.zip
-          if-no-files-found: warn
-          retention-days: 3
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # JOB 5 — macOS: .dmg (Intel x64 + Apple Silicon arm64)
-  #
-  # Strategy:
-  #   • Publish self-contained single binary
-  #   • Create a proper .app bundle (Contents/MacOS + Info.plist + icns icon)
-  #   • Use hdiutil to create a compressed read-write DMG, add a symlink
-  #     to /Applications, then convert to final read-only UDZO DMG
-  #   • Debug symbols zipped separately
-  #
-  # NOTE: Signing/notarization is intentionally omitted here.
-  # To enable code signing add secrets MACOS_CERT_BASE64, MACOS_CERT_PASSWORD,
-  # MACOS_NOTARIZE_APPLE_ID, MACOS_NOTARIZE_PASSWORD, MACOS_TEAM_ID
-  # and uncomment the signing steps below.
-  # ───────────────────────────────────────────────────────────────────────────
-  build-macos:
-    name: macOS DMG · ${{ matrix.arch_label }}
-    needs: version
-    runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - rid:        osx-x64
-            arch_label: macos-x64
-            display:    Intel (x64)
-          - rid:        osx-arm64
-            arch_label: macos-arm64
-            display:    Apple Silicon (arm64)
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Restore
-        run: dotnet restore ${{ env.PROJECT_PATH }}
-
-      # ── Release publish ────────────────────────────────────────────────────
-      - name: Publish release binary
-        run: |
-          MSI_VER="${{ needs.version.outputs.msi_version }}"
-          dotnet publish ${{ env.PROJECT_PATH }} \
-            --configuration Release \
-            --runtime ${{ matrix.rid }} \
-            --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:EnableCompressionInSingleFile=true \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
-            -p:Version="${{ needs.version.outputs.version }}" \
-            -p:AssemblyVersion="${MSI_VER}" \
-            -p:FileVersion="${MSI_VER}" \
-            -p:InformationalVersion="${{ needs.version.outputs.version }}" \
-            --output "publish/release/${{ matrix.rid }}"
-
-          BIN="publish/release/${{ matrix.rid }}/${{ env.APP_NAME }}"
-          [ ! -f "$BIN" ] && { echo "ERROR: $BIN not found"; ls publish/release/${{ matrix.rid }}/; exit 1; }
-          chmod +x "$BIN"
-          echo "Binary: $BIN ($(du -sh "$BIN" | cut -f1))"
-
-      # ── Debug publish ──────────────────────────────────────────────────────
-      - name: Publish debug binary (for symbols)
-        run: |
-          MSI_VER="${{ needs.version.outputs.msi_version }}"
-          dotnet publish ${{ env.PROJECT_PATH }} \
-            --configuration Debug \
-            --runtime ${{ matrix.rid }} \
-            --self-contained true \
-            -p:PublishSingleFile=false \
-            -p:DebugType=portable \
-            -p:DebugSymbols=true \
-            -p:Version="${{ needs.version.outputs.version }}" \
-            -p:AssemblyVersion="${MSI_VER}" \
-            --output "publish/debug/${{ matrix.rid }}"
-
-      - name: Collect macOS PDB files
-        run: |
-          CHANNEL="${{ needs.version.outputs.channel }}"
-          SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && SUFFIX="-${CHANNEL}"
-          ZIP_NAME="${{ env.APP_NAME }}-${{ matrix.arch_label }}${SUFFIX}.pdb.zip"
-          PDBS=$(find "publish/debug/${{ matrix.rid }}" -name "*.pdb" 2>/dev/null || true)
-          if [ -z "$PDBS" ]; then
-            echo "WARNING: no .pdb files found"
-          else
-            mkdir -p publish/debug
-            zip -j "publish/debug/${ZIP_NAME}" $PDBS
-            echo "PDB zip: ${ZIP_NAME}"
-          fi
-
-      # ── Build .app bundle ──────────────────────────────────────────────────
-      - name: Build .app bundle
-        run: |
-          CHANNEL="${{ needs.version.outputs.channel }}"
-          APP_VER="${{ needs.version.outputs.msi_version }}"
-          BUNDLE_ID="${{ env.APP_ID }}"
-          SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && SUFFIX="-${CHANNEL}"
-          APP_BUNDLE="${{ env.APP_NAME }}.app"
-
-          mkdir -p "${APP_BUNDLE}/Contents/MacOS"
-          mkdir -p "${APP_BUNDLE}/Contents/Resources"
-
-          # ── Binary ────────────────────────────────────────────────────
-          cp "publish/release/${{ matrix.rid }}/${{ env.APP_NAME }}" \
-             "${APP_BUNDLE}/Contents/MacOS/${{ env.APP_NAME }}"
-          chmod +x "${APP_BUNDLE}/Contents/MacOS/${{ env.APP_NAME }}"
-
-          # ── Info.plist ────────────────────────────────────────────────
-          DISPLAY_SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && DISPLAY_SUFFIX=" (${CHANNEL^})"
-          cat > "${APP_BUNDLE}/Contents/Info.plist" << PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleIdentifier</key>      <string>${BUNDLE_ID}</string>
-            <key>CFBundleName</key>            <string>${{ env.APP_NAME }}${DISPLAY_SUFFIX}</string>
-            <key>CFBundleDisplayName</key>     <string>${{ env.APP_NAME }}${DISPLAY_SUFFIX}</string>
-            <key>CFBundleExecutable</key>      <string>${{ env.APP_NAME }}</string>
-            <key>CFBundleVersion</key>         <string>${APP_VER}</string>
-            <key>CFBundleShortVersionString</key> <string>${APP_VER}</string>
-            <key>CFBundlePackageType</key>     <string>APPL</string>
-            <key>CFBundleSignature</key>       <string>????</string>
-            <key>CFBundleIconFile</key>        <string>AppIcon</string>
-            <key>LSMinimumSystemVersion</key>  <string>12.0</string>
-            <key>NSHighResolutionCapable</key> <true/>
-            <key>NSHumanReadableCopyright</key>
-              <string>Copyright © $(date +%Y) GeminiChat. MIT License.</string>
-          </dict>
-          </plist>
-          PLIST
-
-          # ── Icon: convert ICO → PNG → ICNS ────────────────────────────
-          # Use sips (built into macOS) to create an .icns from PNG.
-          # If Assets/app.png exists use it; otherwise fall back to app.ico[0].
-          if [ -f "${{ env.APP_ICON_PNG }}" ]; then
-            ICON_SRC="${{ env.APP_ICON_PNG }}"
-          elif [ -f "${{ env.APP_ICON }}" ]; then
-            sips -s format png "${{ env.APP_ICON }}" --out /tmp/appicon_src.png 2>/dev/null || true
-            ICON_SRC="/tmp/appicon_src.png"
-          fi
-
-          if [ -n "${ICON_SRC}" ] && [ -f "${ICON_SRC}" ]; then
-            ICONSET="/tmp/${{ env.APP_NAME }}.iconset"
-            mkdir -p "${ICONSET}"
-            for SIZE in 16 32 64 128 256 512; do
-              sips -z ${SIZE} ${SIZE} "${ICON_SRC}" \
-                --out "${ICONSET}/icon_${SIZE}x${SIZE}.png" 2>/dev/null || true
-              sips -z $((SIZE*2)) $((SIZE*2)) "${ICON_SRC}" \
-                --out "${ICONSET}/icon_${SIZE}x${SIZE}@2x.png" 2>/dev/null || true
-            done
-            iconutil -c icns "${ICONSET}" -o \
-              "${APP_BUNDLE}/Contents/Resources/AppIcon.icns" 2>/dev/null || true
-            echo "Icon: ${ICON_SRC} → AppIcon.icns"
-          else
-            echo "WARNING: no icon source found, skipping icns"
-          fi
-
-          echo "App bundle: ${APP_BUNDLE}"
-          ls -lh "${APP_BUNDLE}/Contents/MacOS/"
-
-      # ── (OPTIONAL) Code signing — uncomment when secrets are configured ────
-      # - name: Import signing certificate
-      #   if: ${{ secrets.MACOS_CERT_BASE64 != '' }}
-      #   run: |
-      #     echo "${{ secrets.MACOS_CERT_BASE64 }}" | base64 --decode > /tmp/cert.p12
-      #     security create-keychain -p "" build.keychain
-      #     security import /tmp/cert.p12 -k build.keychain \
-      #       -P "${{ secrets.MACOS_CERT_PASSWORD }}" -T /usr/bin/codesign
-      #     security set-key-partition-list -S apple-tool:,apple: -k "" build.keychain
-      #     security list-keychains -d user -s build.keychain
-      #
-      # - name: Sign .app bundle
-      #   if: ${{ secrets.MACOS_CERT_BASE64 != '' }}
-      #   run: |
-      #     codesign --deep --force --options runtime \
-      #       --sign "Developer ID Application: Your Name (TEAMID)" \
-      #       "${{ env.APP_NAME }}.app"
-      #
-      # - name: Notarize .app
-      #   if: ${{ secrets.MACOS_CERT_BASE64 != '' }}
-      #   run: |
-      #     ditto -c -k --keepParent "${{ env.APP_NAME }}.app" /tmp/app_to_notarize.zip
-      #     xcrun notarytool submit /tmp/app_to_notarize.zip \
-      #       --apple-id "${{ secrets.MACOS_NOTARIZE_APPLE_ID }}" \
-      #       --password "${{ secrets.MACOS_NOTARIZE_PASSWORD }}" \
-      #       --team-id "${{ secrets.MACOS_TEAM_ID }}" \
-      #       --wait
-      #     xcrun stapler staple "${{ env.APP_NAME }}.app"
-
-      # ── Build .dmg ────────────────────────────────────────────────────────
-      - name: Build .dmg
-        run: |
-          CHANNEL="${{ needs.version.outputs.channel }}"
-          SUFFIX=""
-          [ "${CHANNEL}" != "stable" ] && SUFFIX="-${CHANNEL}"
-          APP_NAME="${{ env.APP_NAME }}"
-          DMG_NAME="${APP_NAME}-${{ matrix.arch_label }}${SUFFIX}.dmg"
-          DMG_TITLE="${APP_NAME} ${{ needs.version.outputs.msi_version }}"
-          DMG_STAGING="/tmp/dmg_staging"
-          DMG_RW="/tmp/${APP_NAME}_rw.dmg"
-
-          mkdir -p dist "${DMG_STAGING}"
-          cp -R "${APP_NAME}.app" "${DMG_STAGING}/"
-
-          # Symlink to /Applications for drag-install UX
-          ln -s /Applications "${DMG_STAGING}/Applications"
-
-          # Create a read-write sparse DMG, then convert to compressed read-only
-          hdiutil create -volname "${DMG_TITLE}" \
-            -srcfolder "${DMG_STAGING}" \
-            -ov -format UDRW \
-            "${DMG_RW}"
-
-          hdiutil convert "${DMG_RW}" \
-            -format UDZO \
-            -imagekey zlib-level=9 \
-            -o "dist/${DMG_NAME}"
-
-          SIZE=$(du -sh "dist/${DMG_NAME}" | cut -f1)
-          echo "Built: dist/${DMG_NAME}  (${SIZE})"
-
-      - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dmg-${{ matrix.rid }}
-          path: dist/*.dmg
-          retention-days: 3
-
-      - name: Upload macOS PDB artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pdb-macos-${{ matrix.rid }}
-          path: publish/debug/*.pdb.zip
-          if-no-files-found: warn
-          retention-days: 3
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # JOB 6 — Create GitHub Release with ALL assets attached
+  # JOB 4 — Create GitHub Release with all assets
   # ───────────────────────────────────────────────────────────────────────────
   release:
     name: Publish GitHub Release
-    needs: [version, build-exe, build-msi, build-linux, build-macos]
+    needs: [version, build-exe, build-msi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -1029,7 +431,6 @@ jobs:
         run: |
           CHANNEL="${{ needs.version.outputs.channel }}"
           VERSION="${{ needs.version.outputs.version }}"
-
           case "${CHANNEL}" in
             alpha)   BANNER="⚠️ **Alpha** — Early preview. May be unstable. Not for production." ;;
             beta)    BANNER="🔶 **Beta** — Feature-complete but may contain bugs. Feedback welcome." ;;
@@ -1037,67 +438,23 @@ jobs:
             preview) BANNER="🔵 **Preview** — Showcases upcoming features. May change before stable." ;;
             *)       BANNER="✅ **Stable Release** — Recommended for all users." ;;
           esac
-
-          S=""
-          [ "${CHANNEL}" != "stable" ] && S="-${CHANNEL}"
-
+          SUFFIX=""
+          [[ "${CHANNEL}" != "stable" ]] && SUFFIX="-${CHANNEL}"
           cat > release_notes.md << EOMD
           ## ${{ needs.version.outputs.display_name }}
-
           ${BANNER}
-
           ---
-
           ### 📦 Downloads
-
-          #### 🪟 Windows
           | File | Architecture | Type |
           |------|-------------|------|
-          | \`GeminiChat-x64${S}.exe\` | x86-64 | Portable — run directly, no install |
-          | \`GeminiChat-arm64${S}.exe\` | ARM64 | Portable — run directly, no install |
-          | \`GeminiChat-x64${S}.msi\` | x86-64 | Installer — Desktop + Start Menu shortcuts |
-          | \`GeminiChat-arm64${S}.msi\` | ARM64 | Installer — Desktop + Start Menu shortcuts |
-
-          > MSI installs to \`%LocalAppData%\\GeminiChat\` — no administrator rights required.
-          > ARM64 is for Snapdragon X / Copilot+ PCs, Surface Pro X, etc.
-
-          #### 🐧 Linux
-          | File | Architecture | Type |
-          |------|-------------|------|
-          | \`GeminiChat-x64${S}.deb\` | x86-64 | Debian / Ubuntu / Mint |
-          | \`GeminiChat-arm64${S}.deb\` | ARM64 | Debian / Ubuntu / Mint |
-          | \`GeminiChat-x64${S}.rpm\` | x86-64 | Fedora / RHEL / openSUSE |
-          | \`GeminiChat-arm64${S}.rpm\` | ARM64 | Fedora / RHEL / openSUSE |
-
-          > Install .deb: \`sudo dpkg -i GeminiChat-x64${S}.deb\`
-          > Install .rpm: \`sudo rpm -i GeminiChat-x64${S}.rpm\`
-          > Installs to \`/opt/geminichat/\` with symlink in \`/usr/local/bin/\`
-
-          #### 🍎 macOS
-          | File | Architecture | Type |
-          |------|-------------|------|
-          | \`GeminiChat-macos-x64${S}.dmg\` | Intel | macOS 12+ |
-          | \`GeminiChat-macos-arm64${S}.dmg\` | Apple Silicon | macOS 12+ |
-
-          > Open the DMG, drag **GeminiChat** to Applications, then launch from Finder or Spotlight.
-          > If macOS says "unidentified developer": right-click → Open → Open anyway.
-
-          #### 🐛 Debug Symbols
-          | File | Platform |
-          |------|---------|
-          | \`GeminiChat-x64-win${S}.pdb.zip\` | Windows x64 |
-          | \`GeminiChat-arm64-win${S}.pdb.zip\` | Windows ARM64 |
-          | \`GeminiChat-x64-linux${S}.pdb.zip\` | Linux x64 |
-          | \`GeminiChat-arm64-linux${S}.pdb.zip\` | Linux ARM64 |
-          | \`GeminiChat-macos-x64${S}.pdb.zip\` | macOS Intel |
-          | \`GeminiChat-macos-arm64${S}.pdb.zip\` | macOS Apple Silicon |
-
-          > PDB files are portable debug symbols compatible with dotnet-dump, WinDbg, and JetBrains Rider.
-
+          | \`GeminiChat-x64${SUFFIX}.exe\` | Windows 11 x86-64 | Portable — run directly |
+          | \`GeminiChat-arm64${SUFFIX}.exe\` | Windows 11 ARM64 | Portable — run directly |
+          | \`GeminiChat-x64${SUFFIX}.msi\` | Windows 11 x86-64 | Installer with shortcuts |
+          | \`GeminiChat-arm64${SUFFIX}.msi\` | Windows 11 ARM64 | Installer with shortcuts |
+          > **Which file?** Most Windows PCs use **x64**. ARM64 is for Snapdragon X / Copilot+ PCs, Surface Pro X, etc.
+          > The MSI installs to \`%LocalAppData%\\GeminiChat\` — no administrator rights required.
           ---
-
           ### 🤖 Supported Models
-
           | Model | API ID |
           |-------|--------|
           | Gemini 2.5 Flash | \`gemini-2.5-flash\` |
@@ -1106,20 +463,14 @@ jobs:
           | Gemini 3 Flash | \`gemini-3-flash-preview\` |
           | Gemini 3.1 Pro | \`gemini-3.1-pro-preview\` |
           | Gemini 3.1 Flash Lite | \`gemini-3.1-flash-lite-preview\` |
-
           ---
-
           ### 🚀 Getting Started
-
-          1. Download the installer for your platform above
+          1. Download the \`.msi\` for your architecture and run it (or use the portable \`.exe\`)
           2. Get a free API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
           3. Launch **Gemini Chat**, paste your key, click **Validate & Save**
-
           ---
-
           **Full changelog:** [\`${VERSION}\`](../../commits/${{ needs.version.outputs.tag }})
           EOMD
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -1134,17 +485,5 @@ jobs:
             artifacts/exe-win-arm64/*.exe
             artifacts/msi-win-x64/*.msi
             artifacts/msi-win-arm64/*.msi
-            artifacts/deb-linux-x64/*.deb
-            artifacts/deb-linux-arm64/*.deb
-            artifacts/rpm-linux-x64/*.rpm
-            artifacts/rpm-linux-arm64/*.rpm
-            artifacts/dmg-osx-x64/*.dmg
-            artifacts/dmg-osx-arm64/*.dmg
-            artifacts/pdb-win-win-x64/*.pdb.zip
-            artifacts/pdb-win-win-arm64/*.pdb.zip
-            artifacts/pdb-linux-linux-x64/*.pdb.zip
-            artifacts/pdb-linux-linux-arm64/*.pdb.zip
-            artifacts/pdb-macos-osx-x64/*.pdb.zip
-            artifacts/pdb-macos-osx-arm64/*.pdb.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
