@@ -626,20 +626,18 @@ jobs:
           # ── control file ──────────────────────────────────────────────
           # FIX: <<-EOF strips leading tabs; all field names land at col 0.
           INSTALLED_SIZE=$(du -sk "${STAGE}${INSTALL_DIR}" | cut -f1)
-          cat > "${STAGE}/DEBIAN/control" <<-CTRL
-          Package: ${PKG_NAME}
-          Version: ${PKG_VER}
-          Architecture: ${{ matrix.deb_arch }}
-          Maintainer: ${{ env.DEB_MAINTAINER }}
-          Installed-Size: ${INSTALLED_SIZE}
-          Depends: libx11-6, libice6, libsm6, libfontconfig1
-          Section: net
-          Priority: optional
-          Homepage: https://github.com/${{ github.repository }}
-          Description: ${{ env.DEB_DESCRIPTION }}
-          Google Gemini powered AI chatbot with streaming responses,
-          persistent chat history, and support for multiple models.
-          CTRL
+          printf 'Package: %s\n'           "${PKG_NAME}"                        > "${STAGE}/DEBIAN/control"
+          printf 'Version: %s\n'           "${PKG_VER}"                         >> "${STAGE}/DEBIAN/control"
+          printf 'Architecture: %s\n'      "${{ matrix.deb_arch }}"             >> "${STAGE}/DEBIAN/control"
+          printf 'Maintainer: %s\n'        "${{ env.DEB_MAINTAINER }}"          >> "${STAGE}/DEBIAN/control"
+          printf 'Installed-Size: %s\n'    "${INSTALLED_SIZE}"                  >> "${STAGE}/DEBIAN/control"
+          printf 'Depends: %s\n'           'libx11-6, libice6, libsm6, libfontconfig1' >> "${STAGE}/DEBIAN/control"
+          printf 'Section: %s\n'           'net'                                 >> "${STAGE}/DEBIAN/control"
+          printf 'Priority: %s\n'          'optional'                            >> "${STAGE}/DEBIAN/control"
+          printf 'Homepage: %s\n'          'https://github.com/${{ github.repository }}' >> "${STAGE}/DEBIAN/control"
+          printf 'Description: %s\n'       "${{ env.DEB_DESCRIPTION }}"         >> "${STAGE}/DEBIAN/control"
+          printf ' %s\n'                   'Google Gemini powered AI chatbot with streaming responses,' >> "${STAGE}/DEBIAN/control"
+          printf ' %s\n'                   'persistent chat history, and support for multiple models.' >> "${STAGE}/DEBIAN/control"
 
           # ── postinst: update icon cache ────────────────────────────────
           cat > "${STAGE}/DEBIAN/postinst" <<-'POSTINST'
