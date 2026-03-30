@@ -11,9 +11,9 @@ name: Release
 # ┌─────────────────────────────────────────────┬────────────────────────────┐
 # │ Windows                                     │ Linux                      │
 # │  GeminiChat-x64.exe        portable         │  GeminiChat-x64.deb        │
-# │  GeminiChat-arm64.exe      portable         │  GeminiChat-arm64.deb      │
-# │  GeminiChat-x64.msi        installer        │  GeminiChat-x64.rpm        │
-# │  GeminiChat-arm64.msi      installer        │  GeminiChat-arm64.rpm      │
+# │  GeminiChat-arm64.exe      portable         │  GeminiChat-x64.rpm        │
+# │  GeminiChat-x64.msi        installer        │                            │
+# │  GeminiChat-arm64.msi      installer        │                            │
 # ├─────────────────────────────────────────────┼────────────────────────────┤
 # │ macOS                                       │ Debug symbols (all)        │
 # │  GeminiChat-macos-x64.dmg  Intel            │  GeminiChat-*.pdb.zip      │
@@ -397,7 +397,7 @@ jobs:
           retention-days: 3
 
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 4 — Linux: .deb and .rpm (x64 + arm64)
+  # JOB 4 — Linux: .deb and .rpm (x64)
   #
   # FIXES vs previous version:
   #   1. RPM spec %files uses %{buildroot} macros, not hardcoded /opt paths
@@ -419,10 +419,6 @@ jobs:
             arch_label: x64
             deb_arch:   amd64
             rpm_arch:   x86_64
-          - rid:        linux-arm64
-            arch_label: arm64
-            deb_arch:   arm64
-            rpm_arch:   aarch64
 
     steps:
       - name: Checkout
@@ -986,9 +982,7 @@ jobs:
           | File | Architecture | Type |
           |------|-------------|------|
           | \`GeminiChat-x64${S}.deb\` | x86-64 | Debian / Ubuntu / Mint |
-          | \`GeminiChat-arm64${S}.deb\` | ARM64 | Debian / Ubuntu / Mint |
           | \`GeminiChat-x64${S}.rpm\` | x86-64 | Fedora / RHEL / openSUSE |
-          | \`GeminiChat-arm64${S}.rpm\` | ARM64 | Fedora / RHEL / openSUSE |
 
           > \`sudo dpkg -i GeminiChat-x64${S}.deb\` · \`sudo rpm -i GeminiChat-x64${S}.rpm\`
 
@@ -1006,7 +1000,6 @@ jobs:
           | \`GeminiChat-x64-win${S}.pdb.zip\` | Windows x64 |
           | \`GeminiChat-arm64-win${S}.pdb.zip\` | Windows ARM64 |
           | \`GeminiChat-x64-linux${S}.pdb.zip\` | Linux x64 |
-          | \`GeminiChat-arm64-linux${S}.pdb.zip\` | Linux ARM64 |
           | \`GeminiChat-macos-x64${S}.pdb.zip\` | macOS Intel |
           | \`GeminiChat-macos-arm64${S}.pdb.zip\` | macOS Apple Silicon |
 
@@ -1051,15 +1044,12 @@ jobs:
             artifacts/msi-win-x64/*.msi
             artifacts/msi-win-arm64/*.msi
             artifacts/deb-linux-x64/*.deb
-            artifacts/deb-linux-arm64/*.deb
             artifacts/rpm-linux-x64/*.rpm
-            artifacts/rpm-linux-arm64/*.rpm
             artifacts/dmg-macos-x64/*.dmg
             artifacts/dmg-macos-arm64/*.dmg
             artifacts/pdb-win-x64/*.pdb.zip
             artifacts/pdb-win-arm64/*.pdb.zip
             artifacts/pdb-linux-x64/*.pdb.zip
-            artifacts/pdb-linux-arm64/*.pdb.zip
             artifacts/pdb-macos-macos-x64/*.pdb.zip
             artifacts/pdb-macos-macos-arm64/*.pdb.zip
         env:
