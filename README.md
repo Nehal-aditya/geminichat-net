@@ -5,7 +5,7 @@
 **A cross-platform AI chatbot desktop app built with Avalonia UI and C#, powered by Google Gemini.**
 
 [![Release](https://img.shields.io/github/v/release/Nehal-aditya/geminichat-net?style=flat-square&color=2563EB&label=latest)](https://github.com/Nehal-aditya/geminichat-net/releases/latest)
-[![Release](https://img.shields.io/github/v/release/Nehal-aditya/geminichat-net?style=flat-square&color=2563EB&label=latest)](https://github.com/Nehal-aditya/geminichat-net/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Nehal-aditya/geminichat-net/release.yml?style=flat-square&label=release&event=push)](https://github.com/Nehal-aditya/geminichat-net/actions/workflows/release.yml)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Avalonia](https://img.shields.io/badge/Avalonia-11.2-8B5CF6?style=flat-square)](https://avaloniaui.net)
 [![License](https://img.shields.io/badge/license-MIT-10B981?style=flat-square)](LICENSE)
