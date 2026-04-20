@@ -247,8 +247,8 @@
                        FontSize="13" Foreground="{DynamicResource MainText}" TextWrapping="Wrap"/>
           </StackPanel>
           
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-            <TextBox Grid.Column="0" Text="{Binding ApiKey}" PasswordChar="●" Watermark="Paste your API key here..."/>
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Grid.Column="0" Text="{Binding ApiKey}" PasswordChar="●" Watermark="Paste your API key here..." Margin="0,0,12,0"/>
             <Button Grid.Column="1" Classes="primary" Content="Save Key" Command="{Binding SaveApiKeyAsync}"
                     IsEnabled="{Binding !IsValidating}"/>
           </Grid>
