@@ -11,8 +11,14 @@ using Markdig.Syntax.Inlines;
 
 namespace GeminiChat.Controls
 {
+    /// <summary>
+    /// Avalonia control that renders a Markdown string as styled native controls.
+    /// Bind the <see cref="Markdown"/> property; the panel rebuilds whenever it changes.
+    /// </summary>
     public class MarkdownViewer : StackPanel
     {
+        // ── Dependency Property ───────────────────────────────────────────────
+
         public static readonly StyledProperty<string?> MarkdownProperty =
             AvaloniaProperty.Register<MarkdownViewer, string?>(nameof(Markdown));
 
@@ -22,10 +28,14 @@ namespace GeminiChat.Controls
             set => SetValue(MarkdownProperty, value);
         }
 
+        // ── Pipeline ─────────────────────────────────────────────────────────
+
         private static readonly MarkdownPipeline Pipeline =
             new MarkdownPipelineBuilder()
                 .UseAdvancedExtensions()
                 .Build();
+
+        // ── Theme colours (match app palette) ────────────────────────────────
 
         private IBrush GetResourceBrush(string key, Color fallback)
         {
@@ -49,12 +59,18 @@ namespace GeminiChat.Controls
         private static readonly FontFamily MonoFont =
             new FontFamily("Cascadia Code,Consolas,Courier New,monospace");
 
+        // ── Constructor ───────────────────────────────────────────────────────
+
         public MarkdownViewer()
         {
             Spacing   = 6;
             Orientation = Orientation.Vertical;
+
+            // React to property changes
             this.GetObservable(MarkdownProperty).Subscribe(Rebuild);
         }
+
+        // ── Rebuild ───────────────────────────────────────────────────────────
 
         private void Rebuild(string? md)
         {
@@ -69,6 +85,8 @@ namespace GeminiChat.Controls
             foreach (var block in doc)
                 Children.Add(RenderBlock(block));
         }
+
+        // ── Block rendering ───────────────────────────────────────────────────
 
         private Control RenderBlock(Block block)
         {
@@ -85,6 +103,7 @@ namespace GeminiChat.Controls
             };
         }
 
+        // Heading
         private Control RenderHeading(HeadingBlock h)
         {
             var tb = new SelectableTextBlock
@@ -105,6 +124,7 @@ namespace GeminiChat.Controls
             return tb;
         }
 
+        // Paragraph
         private Control RenderParagraph(ParagraphBlock p)
         {
             var tb = new SelectableTextBlock
@@ -118,6 +138,7 @@ namespace GeminiChat.Controls
             return tb;
         }
 
+        // Fenced/indented code block
         private Control RenderCodeBlock(string code)
         {
             var scroll = new ScrollViewer
@@ -149,6 +170,7 @@ namespace GeminiChat.Controls
             };
         }
 
+        // Blockquote
         private Control RenderQuote(QuoteBlock q)
         {
             var inner = new StackPanel { Spacing = 4, Margin = new Thickness(10, 6, 6, 6) };
@@ -178,6 +200,7 @@ namespace GeminiChat.Controls
             };
         }
 
+        // List
         private Control RenderList(ListBlock list)
         {
             var panel = new StackPanel { Spacing = 3, Margin = new Thickness(4, 0, 0, 0) };
@@ -213,6 +236,7 @@ namespace GeminiChat.Controls
             return panel;
         }
 
+        // Horizontal rule
         private Control RenderRule() =>
             new Border
             {
@@ -221,6 +245,7 @@ namespace GeminiChat.Controls
                 Margin          = new Thickness(0, 6, 0, 6),
             };
 
+        // Fallback — just render as plain text
         private Control RenderFallback(Block block)
         {
             var tb = new SelectableTextBlock
@@ -232,6 +257,8 @@ namespace GeminiChat.Controls
             };
             return tb;
         }
+
+        // ── Inline rendering ──────────────────────────────────────────────────
 
         private void AppendInlines(InlineCollection target, ContainerInline? container)
         {
@@ -250,6 +277,7 @@ namespace GeminiChat.Controls
 
                 case EmphasisInline em:
                 {
+                    // DelimiterCount==2 → bold, ==1 → italic
                     var span = new Span();
                     if (em.DelimiterCount >= 2) span.FontWeight = FontWeight.Bold;
                     if (em.DelimiterCount == 1) span.FontStyle  = FontStyle.Italic;
@@ -260,6 +288,7 @@ namespace GeminiChat.Controls
 
                 case CodeInline code:
                 {
+                    // Inline code — render as a bold mono run inside a styled span
                     var span = new Span
                     {
                         FontFamily  = MonoFont,
@@ -278,6 +307,7 @@ namespace GeminiChat.Controls
 
                 case LinkInline link:
                 {
+                    // Render link text underlined in blue (no click handler — desktop only)
                     var span = new Span
                     {
                         Foreground      = BulletBrush,
@@ -297,6 +327,8 @@ namespace GeminiChat.Controls
                     break;
             }
         }
+
+        // ── Helpers ───────────────────────────────────────────────────────────
 
         private SelectableTextBlock MakePlainText(string text) =>
             new()
