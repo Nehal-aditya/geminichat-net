@@ -4,8 +4,6 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia;
-using Avalonia.Styling;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GeminiChat.Models;
@@ -41,9 +39,6 @@ namespace GeminiChat.ViewModels
         [ObservableProperty] private bool   _enableStreaming = true;
         [ObservableProperty] private string _systemPrompt   = "You are a helpful, harmless, and honest AI assistant powered by Google Gemini.";
 
-        // Theme
-        [ObservableProperty] private bool _isDarkMode = true;
-
         public ObservableCollection<ChatSession>  Sessions        { get; } = new();
         public ObservableCollection<GeminiModel>  AvailableModels { get; } = new(GeminiModel.All);
         public List<IcebreakerTile>               IcebreakerTiles { get; } = IcebreakerTile.All;
@@ -59,11 +54,8 @@ namespace GeminiChat.ViewModels
             MaxTokens      = s.MaxOutputTokens;
             EnableStreaming = s.EnableStreaming;
             SystemPrompt   = s.SystemPrompt;
-            IsDarkMode     = s.Theme != "Light";
             SelectedModel  = GeminiModel.All.FirstOrDefault(m => m.Id == s.DefaultModelId)
                              ?? GeminiModel.Flash25;
-
-            ApplyTheme();
 
             // Validate stored key
             if (!string.IsNullOrWhiteSpace(ApiKey))
@@ -83,21 +75,6 @@ namespace GeminiChat.ViewModels
                 CurrentSession = Sessions[0];
             else
                 NewSession();
-        }
-
-        private void ApplyTheme()
-        {
-            if (Application.Current != null)
-            {
-                Application.Current.RequestedThemeVariant = IsDarkMode ? ThemeVariant.Dark : ThemeVariant.Light;
-            }
-        }
-
-        partial void OnIsDarkModeChanged(bool value)
-        {
-            ApplyTheme();
-            _svc.Settings.Theme = value ? "Dark" : "Light";
-            _svc.Save();
         }
 
         // ── Session Management ────────────────────────────────────────────────
@@ -317,7 +294,6 @@ namespace GeminiChat.ViewModels
             s.MaxOutputTokens = MaxTokens;
             s.EnableStreaming  = EnableStreaming;
             s.SystemPrompt    = SystemPrompt;
-            s.Theme           = IsDarkMode ? "Dark" : "Light";
             _svc.Save();
             IsSettingsOpen = false;
             StatusMessage  = "Settings saved ✓";

@@ -1,7 +1,5 @@
 using System;
 using System.Globalization;
-using Avalonia;
-using Avalonia.Controls;
 using Avalonia.Data.Converters;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -37,12 +35,9 @@ namespace GeminiChat.Converters
     {
         public static readonly RoleToBubbleBrushConverter Instance = new();
         public object Convert(object? v, Type t, object? p, CultureInfo c)
-        {
-            var key = v is MessageRole r && r == MessageRole.User ? "UserBubbleBg" : "AssistantBubbleBg";
-            if (Application.Current?.TryFindResource(key, out var res) == true && res is IBrush brush)
-                return brush;
-            return new SolidColorBrush(Colors.Gray);
-        }
+            => v is MessageRole r && r == MessageRole.User
+               ? new SolidColorBrush(Color.Parse("#2563EB"))
+               : new SolidColorBrush(Color.Parse("#1E293B"));
         public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotImplementedException();
     }
 
@@ -50,11 +45,7 @@ namespace GeminiChat.Converters
     {
         public static readonly RoleToTextBrushConverter Instance = new();
         public object Convert(object? v, Type t, object? p, CultureInfo c)
-        {
-            if (Application.Current?.TryFindResource("MainText", out var res) == true && res is IBrush brush)
-                return brush;
-            return new SolidColorBrush(Colors.White);
-        }
+            => new SolidColorBrush(Color.Parse("#E2E8F0"));
         public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotImplementedException();
     }
 
@@ -88,12 +79,9 @@ namespace GeminiChat.Converters
     {
         public static readonly IsUserToAvatarBrushConverter Instance = new();
         public object Convert(object? v, Type t, object? p, CultureInfo c)
-        {
-            var key = v is true ? "UserBubbleBg" : "AccentColor";
-            if (Application.Current?.TryFindResource(key, out var res) == true && res is IBrush brush)
-                return brush;
-            return new SolidColorBrush(Colors.Blue);
-        }
+            => v is true
+               ? new SolidColorBrush(Color.Parse("#1E40AF"))
+               : new SolidColorBrush(Color.Parse("#1E3A8A"));
         public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotImplementedException();
     }
 

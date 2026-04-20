@@ -37,24 +37,17 @@ namespace GeminiChat.Controls
 
         // ── Theme colours (match app palette) ────────────────────────────────
 
-        private IBrush GetResourceBrush(string key, Color fallback)
-        {
-            if (Application.Current?.TryFindResource(key, out var res) == true && res is IBrush brush)
-                return brush;
-            return new SolidColorBrush(fallback);
-        }
-
-        private IBrush TextBrush    => GetResourceBrush("MainText", Colors.White);
-        private IBrush DimBrush     => GetResourceBrush("DimText", Colors.Gray);
-        private IBrush CodeBg       => GetResourceBrush("CodeBg", Color.Parse("#0F172A"));
-        private IBrush CodeBorder   => GetResourceBrush("CodeBorder", Color.Parse("#334155"));
-        private IBrush CodeFg       => GetResourceBrush("CodeFg", Color.Parse("#7DD3FC"));
-        private IBrush InlineCodeBg => GetResourceBrush("CodeBg", Color.Parse("#1E293B"));
-        private IBrush QuoteBg      => GetResourceBrush("CodeBg", Color.Parse("#0F172A"));
-        private IBrush QuoteBar     => GetResourceBrush("AccentColor", Color.Parse("#3B82F6"));
-        private IBrush HeadingBrush => GetResourceBrush("MainText", Colors.White);
-        private IBrush BulletBrush  => GetResourceBrush("NeonAccent", Color.Parse("#60A5FA"));
-        private IBrush RuleBrush    => GetResourceBrush("BorderBrush", Color.Parse("#1E293B"));
+        private static readonly IBrush TextBrush       = new SolidColorBrush(Color.Parse("#E2E8F0"));
+        private static readonly IBrush DimBrush        = new SolidColorBrush(Color.Parse("#94A3B8"));
+        private static readonly IBrush CodeBg          = new SolidColorBrush(Color.Parse("#0F172A"));
+        private static readonly IBrush CodeBorder      = new SolidColorBrush(Color.Parse("#334155"));
+        private static readonly IBrush CodeFg          = new SolidColorBrush(Color.Parse("#7DD3FC"));
+        private static readonly IBrush InlineCodeBg    = new SolidColorBrush(Color.Parse("#1E293B"));
+        private static readonly IBrush QuoteBg         = new SolidColorBrush(Color.Parse("#0F172A"));
+        private static readonly IBrush QuoteBar        = new SolidColorBrush(Color.Parse("#3B82F6"));
+        private static readonly IBrush HeadingBrush    = new SolidColorBrush(Color.Parse("#F1F5F9"));
+        private static readonly IBrush BulletBrush     = new SolidColorBrush(Color.Parse("#60A5FA"));
+        private static readonly IBrush RuleBrush       = new SolidColorBrush(Color.Parse("#1E293B"));
 
         private static readonly FontFamily MonoFont =
             new FontFamily("Cascadia Code,Consolas,Courier New,monospace");
@@ -310,7 +303,7 @@ namespace GeminiChat.Controls
                     // Render link text underlined in blue (no click handler — desktop only)
                     var span = new Span
                     {
-                        Foreground      = BulletBrush,
+                        Foreground      = new SolidColorBrush(Color.Parse("#60A5FA")),
                         TextDecorations = TextDecorations.Underline,
                     };
                     AppendInlines(span.Inlines, link);
@@ -330,11 +323,11 @@ namespace GeminiChat.Controls
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
-        private SelectableTextBlock MakePlainText(string text) =>
+        private static SelectableTextBlock MakePlainText(string text) =>
             new()
             {
                 Text         = text,
-                Foreground   = TextBrush,
+                Foreground   = new SolidColorBrush(Color.Parse("#E2E8F0")),
                 FontSize     = 13.5,
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight   = 22,
