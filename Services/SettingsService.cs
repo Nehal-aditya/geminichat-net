@@ -14,6 +14,7 @@ namespace GeminiChat.Services
         public int    MaxOutputTokens { get; set; } = 8192;
         public bool   EnableStreaming  { get; set; } = true;
         public string SystemPrompt    { get; set; } = "You are a helpful, harmless, and honest AI assistant powered by Google Gemini.";
+        public string Theme           { get; set; } = "Dark"; // "Light" or "Dark"
     }
 
     public class SessionSnapshot
