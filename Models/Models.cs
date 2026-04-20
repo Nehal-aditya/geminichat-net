@@ -92,6 +92,25 @@ namespace GeminiChat.Models
         };
     }
 
+    public class IcebreakerTile
+    {
+        public string Icon    { get; init; } = string.Empty;
+        public string Label   { get; init; } = string.Empty;
+        public string Prompt  { get; init; } = string.Empty;
+
+        public static readonly List<IcebreakerTile> All = new()
+        {
+            new() { Icon = "✍️", Label = "Write a poem",          Prompt = "Write a short, creative poem about the beauty of a rainy evening." },
+            new() { Icon = "💡", Label = "Brainstorm ideas",       Prompt = "Give me 5 creative business ideas for someone who loves technology and sustainability." },
+            new() { Icon = "🧠", Label = "Explain a concept",      Prompt = "Explain quantum entanglement in simple terms, as if I'm 12 years old." },
+            new() { Icon = "🌍", Label = "Fun facts",              Prompt = "Tell me 3 surprising and fascinating facts about the universe." },
+            new() { Icon = "🗺️", Label = "Plan a trip",            Prompt = "Help me plan a 5-day travel itinerary for Japan, focusing on culture and food." },
+            new() { Icon = "🐛", Label = "Debug my code",          Prompt = "What are the most common causes of memory leaks in C# and how can I fix them?" },
+            new() { Icon = "📝", Label = "Improve my writing",     Prompt = "Give me tips to make my writing more engaging and concise." },
+            new() { Icon = "🎯", Label = "Set goals",              Prompt = "Help me create a realistic 30-day plan to learn a new programming language." },
+        };
+    }
+
     public class GenerationConfig
     {
         public float Temperature    { get; set; } = 0.9f;

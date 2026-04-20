@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
@@ -40,6 +41,7 @@ namespace GeminiChat.ViewModels
 
         public ObservableCollection<ChatSession>  Sessions        { get; } = new();
         public ObservableCollection<GeminiModel>  AvailableModels { get; } = new(GeminiModel.All);
+        public List<IcebreakerTile>               IcebreakerTiles { get; } = IcebreakerTile.All;
 
         public MainViewModel()
         {
@@ -87,6 +89,14 @@ namespace GeminiChat.ViewModels
             };
             Sessions.Insert(0, session);
             CurrentSession = session;
+        }
+
+        [RelayCommand]
+        public async Task SendIcebreakerAsync(IcebreakerTile tile)
+        {
+            if (tile == null) return;
+            UserInput = tile.Prompt;
+            await SendMessageAsync();
         }
 
         [RelayCommand]

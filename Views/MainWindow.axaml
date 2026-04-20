@@ -4,6 +4,7 @@
         xmlns:vm="clr-namespace:GeminiChat.ViewModels"
         xmlns:m="clr-namespace:GeminiChat.Models"
         xmlns:cv="clr-namespace:GeminiChat.Converters"
+        xmlns:ctrl="clr-namespace:GeminiChat.Controls"
         x:Class="GeminiChat.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="Gemini Chat"
@@ -283,9 +284,9 @@
                   CornerRadius="16"
                   BorderBrush="#1E3A8A" BorderThickness="1"
                   Padding="32,28"
-                  Margin="0,60,0,0"
-                  MaxWidth="480">
-            <StackPanel Spacing="14" HorizontalAlignment="Center">
+                  Margin="0,40,0,0"
+                  MaxWidth="640">
+            <StackPanel Spacing="18" HorizontalAlignment="Center">
               <Border Background="#172554" CornerRadius="14"
                       Width="56" Height="56" HorizontalAlignment="Center">
                 <TextBlock Text="✦" FontSize="26" Foreground="#60A5FA"
@@ -294,7 +295,7 @@
               <TextBlock Text="Welcome to Gemini Chat"
                          FontSize="20" FontWeight="Bold" Foreground="#F1F5F9"
                          HorizontalAlignment="Center"/>
-              <TextBlock Text="Select a model above and start chatting."
+              <TextBlock Text="Select a model above and start chatting, or pick a suggestion below."
                          FontSize="13" Foreground="#64748B"
                          HorizontalAlignment="Center" TextAlignment="Center"/>
               <!-- Model chips -->
@@ -318,6 +319,50 @@
                   <TextBlock Text="3.1 Lite" FontSize="10" Foreground="#60A5FA" HorizontalAlignment="Center"/>
                 </Border>
               </WrapPanel>
+
+              <!-- Divider -->
+              <Border BorderBrush="#1E293B" BorderThickness="0,1,0,0" Margin="0,2"/>
+
+              <!-- Icebreaker tiles label -->
+              <TextBlock Text="TRY ASKING" FontSize="10" FontWeight="SemiBold"
+                         Foreground="#334155" LetterSpacing="1.5"
+                         HorizontalAlignment="Center"/>
+
+              <!-- Icebreaker tiles grid -->
+              <ItemsControl ItemsSource="{Binding IcebreakerTiles}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel HorizontalAlignment="Center"/>
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="m:IcebreakerTile">
+                    <Button Background="#111827"
+                            BorderBrush="#1E293B" BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="12,10"
+                            Margin="5,4"
+                            Width="138"
+                            Cursor="Hand"
+                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SendIcebreakerCommand}"
+                            CommandParameter="{Binding}">
+                      <Button.Styles>
+                        <Style Selector="Button:pointerover /template/ ContentPresenter">
+                          <Setter Property="Background" Value="#1E293B"/>
+                        </Style>
+                      </Button.Styles>
+                      <StackPanel Spacing="6" HorizontalAlignment="Left">
+                        <TextBlock Text="{Binding Icon}" FontSize="18"/>
+                        <TextBlock Text="{Binding Label}"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   Foreground="#CBD5E1"
+                                   TextWrapping="Wrap"/>
+                      </StackPanel>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
             </StackPanel>
           </Border>
 
@@ -371,11 +416,7 @@
                             Padding="14,10"
                             MaxWidth="560">
                       <StackPanel Spacing="6">
-                        <SelectableTextBlock Text="{Binding Content}"
-                                            Foreground="#E2E8F0"
-                                            FontSize="13.5"
-                                            TextWrapping="Wrap"
-                                            LineHeight="22"/>
+                        <ctrl:MarkdownViewer Markdown="{Binding Content}"/>
                         <StackPanel Orientation="Horizontal" Spacing="8">
                           <TextBlock Text="{Binding Timestamp, Converter={StaticResource DateFmt}}"
                                      FontSize="10" Foreground="#475569"/>
